@@ -1,0 +1,61 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Create an aligned cover group",
+        "description": "Choose the shades to keep aligned. If a Lutron Pico is paired on the bridge to exactly these shades, choose its Up, Stop and Down buttons (enable the Pico's disabled button entities first) so the shades start and stop together.",
+        "data": {
+          "name": "Name",
+          "covers": "Shades",
+          "pico_open": "Pico Up (open) button",
+          "pico_stop": "Pico Stop (middle) button",
+          "pico_close": "Pico Down (close) button"
+        }
+      },
+      "shade": {
+        "title": "{name} ({index} of {count})",
+        "description": "Measure every shade's hemline (bottom edge) from the same reference point, such as inches from the floor.",
+        "data": {
+          "open_height": "Hemline height when fully open",
+          "closed_height": "Hemline height when fully closed",
+          "travel_time": "Full travel time (closed to open)"
+        }
+      }
+    },
+    "error": {
+      "too_few_covers": "Choose at least two shades.",
+      "cover_no_position": "Every shade must support setting a position.",
+      "pico_incomplete": "Choose all three Pico buttons, or none.",
+      "closed_not_below_open": "The closed height must be below the open height."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Edit aligned cover group",
+        "description": "Choose the shades to keep aligned, and optionally the Up, Stop and Down buttons of a Pico paired to exactly these shades.",
+        "data": {
+          "covers": "Shades",
+          "pico_open": "Pico Up (open) button",
+          "pico_stop": "Pico Stop (middle) button",
+          "pico_close": "Pico Down (close) button"
+        }
+      },
+      "shade": {
+        "title": "{name} ({index} of {count})",
+        "description": "Measure every shade's hemline (bottom edge) from the same reference point, such as inches from the floor.",
+        "data": {
+          "open_height": "Hemline height when fully open",
+          "closed_height": "Hemline height when fully closed",
+          "travel_time": "Full travel time (closed to open)"
+        }
+      }
+    },
+    "error": {
+      "too_few_covers": "Choose at least two shades.",
+      "cover_no_position": "Every shade must support setting a position.",
+      "pico_incomplete": "Choose all three Pico buttons, or none.",
+      "closed_not_below_open": "The closed height must be below the open height."
+    }
+  }
+}

@@ -1,0 +1,13 @@
+"""Constants for Aligned Cover Group."""
+
+DOMAIN = "aligned_cover_group"
+
+CONF_COVERS = "covers"
+CONF_OPEN_HEIGHT = "open_height"
+CONF_CLOSED_HEIGHT = "closed_height"
+CONF_TRAVEL_TIME = "travel_time"
+CONF_PICO_OPEN = "pico_open"
+CONF_PICO_STOP = "pico_stop"
+CONF_PICO_CLOSE = "pico_close"
+
+PICO_BUTTONS = (CONF_PICO_OPEN, CONF_PICO_STOP, CONF_PICO_CLOSE)
