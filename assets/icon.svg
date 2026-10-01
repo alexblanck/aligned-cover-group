@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <!-- Sunlit sky: warm just below the shades, a warm blue at the bottom -->
+    <linearGradient id="glass" gradientUnits="userSpaceOnUse" x1="0" y1="122" x2="0" y2="246">
+      <stop offset="0" stop-color="#FFCF6E"/>
+      <stop offset="1" stop-color="#A9CCDB"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(12.8 12.8) scale(0.9)">
+    <!-- Glass of three windows of different sizes -->
+    <g fill="url(#glass)">
+      <rect x="10" y="22" width="68" height="204" rx="6"/>
+      <rect x="94" y="58" width="68" height="140" rx="6"/>
+      <rect x="178" y="40" width="68" height="206" rx="6"/>
+    </g>
+
+    <!-- Shades, all pulled down to the same hemline (edges hidden by the frames) -->
+    <g fill="#2E7182">
+      <rect x="10" y="22" width="68" height="100" rx="6"/>
+      <rect x="94" y="58" width="68" height="64" rx="6"/>
+      <rect x="178" y="40" width="68" height="82" rx="6"/>
+    </g>
+
+    <!-- Frames, drawn over the glass and shade edges -->
+    <g fill="none" stroke="#3B4A5A" stroke-width="8" stroke-linejoin="round">
+      <rect x="10" y="22" width="68" height="204" rx="6"/>
+      <rect x="94" y="58" width="68" height="140" rx="6"/>
+      <rect x="178" y="40" width="68" height="206" rx="6"/>
+    </g>
+
+    <!-- Shade bottom rails -->
+    <g fill="#1F4F5C">
+      <rect x="11" y="117" width="66" height="10" rx="2.5"/>
+      <rect x="95" y="117" width="66" height="10" rx="2.5"/>
+      <rect x="179" y="117" width="66" height="10" rx="2.5"/>
+    </g>
+  </g>
+
+  <!-- The shared hemline -->
+  <line x1="3" y1="122.6" x2="253" y2="122.6" stroke="#FF6B3D" stroke-width="3.2"
+        stroke-linecap="round" stroke-dasharray="6 6"/>
+</svg>

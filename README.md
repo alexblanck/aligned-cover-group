@@ -1,3 +1,5 @@
+<img src="custom_components/aligned_cover_group/brand/icon@2x.png" alt="" width="128" align="right">
+
 # Aligned Cover Group
 
 A Home Assistant helper that groups side-by-side window shades of different

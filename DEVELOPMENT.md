@@ -117,6 +117,25 @@ Turn on debug logging (see the README) to see each planned move: the positions
 it planned from, whether it used the Pico (and why not), and every shade
 command with its delay.
 
+## Icon
+
+The source is [assets/icon.svg](assets/icon.svg). Home Assistant shows the PNG
+exports in `custom_components/aligned_cover_group/brand/` (`icon.png` at
+256 px, `icon@2x.png` at 512 px, transparent background). After editing the
+SVG, re-export both, for example with headless Chrome:
+
+```bash
+for size in 256 512; do
+  echo "<body style=margin:0><img src=\"file://$PWD/assets/icon.svg\" width=$size height=$size style=display:block>" > /tmp/icon.html
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
+    --hide-scrollbars --default-background-color=00000000 \
+    --window-size=$size,$size --allow-file-access-from-files \
+    --screenshot=/tmp/icon_$size.png file:///tmp/icon.html
+done
+cp /tmp/icon_256.png custom_components/aligned_cover_group/brand/icon.png
+cp /tmp/icon_512.png custom_components/aligned_cover_group/brand/icon@2x.png
+```
+
 ## Releasing
 
 1. Bump `version` in `custom_components/aligned_cover_group/manifest.json`.
