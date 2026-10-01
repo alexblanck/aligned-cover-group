@@ -9,7 +9,7 @@ stops at exactly the same moment.
 
 ## How it works
 
-- You tell it each shade's hemline height when fully open and fully closed,
+- You tell it each shade's hemline height when fully closed and fully open,
   measured from a common reference (e.g. inches from the floor), plus how long
   the tallest shade takes to travel fully.
 - All shades are assumed to move at the same speed (inches per second), as

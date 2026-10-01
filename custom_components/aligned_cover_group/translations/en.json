@@ -31,10 +31,10 @@
       },
       "shade": {
         "title": "{name} (shade {index} of {count})",
-        "description": "Where is this shade's bottom edge (hemline) when fully open and when fully closed? Measure every shade from the same point, such as inches from the floor.",
+        "description": "Where is this shade's bottom edge (hemline) when fully closed and when fully open? Measure every shade from the same point, such as inches from the floor.",
         "data": {
-          "open_height": "Hemline height when fully open",
-          "closed_height": "Hemline height when fully closed"
+          "closed_height": "Hemline height when fully closed",
+          "open_height": "Hemline height when fully open"
         }
       },
       "travel": {
@@ -84,10 +84,10 @@
       },
       "shade": {
         "title": "{name} (shade {index} of {count})",
-        "description": "Where is this shade's bottom edge (hemline) when fully open and when fully closed? Measure every shade from the same point, such as inches from the floor.",
+        "description": "Where is this shade's bottom edge (hemline) when fully closed and when fully open? Measure every shade from the same point, such as inches from the floor.",
         "data": {
-          "open_height": "Hemline height when fully open",
-          "closed_height": "Hemline height when fully closed"
+          "closed_height": "Hemline height when fully closed",
+          "open_height": "Hemline height when fully open"
         }
       },
       "travel": {

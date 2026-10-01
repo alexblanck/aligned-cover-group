@@ -41,8 +41,8 @@ _HEIGHT = selector.NumberSelector(
 
 SHADE_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_OPEN_HEIGHT): _HEIGHT,
         vol.Required(CONF_CLOSED_HEIGHT): _HEIGHT,
+        vol.Required(CONF_OPEN_HEIGHT): _HEIGHT,
     }
 )
 

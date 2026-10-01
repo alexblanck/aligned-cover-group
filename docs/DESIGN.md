@@ -32,8 +32,8 @@ Per shade:
 
 | Field | Notes |
 |---|---|
-| open_height | hemline height when fully open |
-| closed_height | hemline height when fully closed (< open_height) |
+| closed_height | hemline height when fully closed |
+| open_height | hemline height when fully open (> closed_height) |
 
 Heights use any unit, as long as every shade uses the same reference (e.g.
 inches from the floor). Tops do not need to match, but every shade's range must
