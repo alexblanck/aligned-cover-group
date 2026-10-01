@@ -1,4 +1,4 @@
-<img src="custom_components/aligned_cover_group/brand/icon@2x.png" alt="" width="128" align="right">
+<img src="https://raw.githubusercontent.com/alexblanck/aligned-cover-group/main/custom_components/aligned_cover_group/brand/icon@2x.png" alt="" width="128" align="right">
 
 # Aligned Cover Group
 
