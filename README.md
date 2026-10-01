@@ -32,6 +32,17 @@ See [docs/DESIGN.md](docs/DESIGN.md) for details.
    enable its disabled button entities.
 3. Choose its Up, Stop and Down buttons when creating the group.
 
+## Troubleshooting
+
+Turn on debug logging to see each move the group plans: whether it used the
+Pico (and why not), every shade command with its delay, and stops.
+
+```yaml
+logger:
+  logs:
+    custom_components.aligned_cover_group: debug
+```
+
 ## Development
 
 ```bash

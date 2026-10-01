@@ -137,6 +137,7 @@ class _ShadeSteps:
             },
         )
 
+    @callback
     def _async_finish(self, options: dict[str, Any]) -> ConfigFlowResult:
         raise NotImplementedError
 
@@ -180,6 +181,7 @@ class AlignedCoverGroupConfigFlow(_ShadeSteps, ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    @callback
     def _async_finish(self, options: dict[str, Any]) -> ConfigFlowResult:
         return self.async_create_entry(title=self._name, data={}, options=options)
 
@@ -218,5 +220,6 @@ class AlignedCoverGroupOptionsFlow(_ShadeSteps, OptionsFlowWithReload):
             errors=errors,
         )
 
+    @callback
     def _async_finish(self, options: dict[str, Any]) -> ConfigFlowResult:
         return self.async_create_entry(data=options)

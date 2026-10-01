@@ -69,7 +69,8 @@ class Plan:
     If `pico` is set, press that Pico button first; it starts every paired shade
     at once. `moves` then retarget shades that should stop short of the endpoint.
     `trips` describes where every moving shade is headed and when it starts,
-    however it is commanded.
+    however it is commanded. `pico_blocker` says why an available Pico wasn't
+    used.
     """
 
     pico: Direction | None
@@ -77,6 +78,7 @@ class Plan:
     direction: Direction | None
     duration: float
     trips: tuple[Move, ...] = ()
+    pico_blocker: str | None = None
 
 
 class Group:
@@ -167,12 +169,16 @@ class Group:
             return Plan(pico=None, moves=(), direction=None, duration=0.0)
         direction = directions[0] if len(directions) == 1 else None
 
-        if (
-            pico_available
-            and direction is not None
-            and self._pico_safe(positions, direction, len(travel[direction]))
-        ):
-            return self._pico_plan(direction, travel[direction])
+        blocker = None
+        if pico_available:
+            if direction is None:
+                blocker = "shades are moving in different directions"
+            else:
+                blocker = self._pico_blocker(
+                    positions, direction, len(travel[direction])
+                )
+            if blocker is None:
+                return self._pico_plan(direction, travel[direction])
 
         moves: list[Move] = []
         duration = 0.0
@@ -200,19 +206,20 @@ class Group:
             direction=direction,
             duration=duration,
             trips=tuple(moves),
+            pico_blocker=blocker,
         )
 
-    def _pico_safe(
+    def _pico_blocker(
         self, positions: Mapping[str, float], direction: Direction, moving: int
-    ) -> bool:
-        """Whether a Pico press would start every shade from the same hemline.
+    ) -> str | None:
+        """Why a Pico press can't be used, or None if it's safe.
 
         The Pico moves every paired shade that isn't already at the endpoint,
         so all of those must need to move and share a hemline (and all
         positions must be known).
         """
         if len(self._known(positions)) != len(self.shades):
-            return False
+            return "some shade positions are unknown"
         endpoint = 100 if direction is Direction.OPENING else 0
         hemlines = [
             shade.hemline(positions[shade.entity_id])
@@ -220,8 +227,13 @@ class Group:
             if positions[shade.entity_id] != endpoint
         ]
         if len(hemlines) != moving:
-            return False
-        return max(hemlines) - min(hemlines) <= self.tolerance
+            return "it would move a shade that is already in place"
+        if max(hemlines) - min(hemlines) > self.tolerance:
+            return (
+                f"shades start from different hemlines "
+                f"({min(hemlines):.1f} to {max(hemlines):.1f})"
+            )
+        return None
 
     def _pico_plan(
         self, direction: Direction, shades: list[tuple[Shade, float, int]]

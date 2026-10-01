@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -43,6 +44,8 @@ from .const import (
     CONF_PICO_STOP,
     CONF_TRAVEL_TIME,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 # Extra time after the planned motion before the group reports it has stopped.
 MOTION_END_MARGIN = 2.0
@@ -206,16 +209,42 @@ class AlignedCoverGroup(CoverEntity):
         # A shade Pico's middle button goes to the favorite position when the
         # shades are stationary, so only press it while we think they're moving.
         if self._pico and was_moving:
+            _LOGGER.debug("%s: stopping with Pico %s", self.entity_id, self._pico[None])
             await self._async_call(BUTTON_DOMAIN, SERVICE_PRESS, self._pico[None])
         else:
+            _LOGGER.debug(
+                "%s: stopping each shade (%s)",
+                self.entity_id,
+                "no Pico"
+                if not self._pico
+                else "not moving, Pico would go to favorite",
+            )
             await self._async_call(COVER_DOMAIN, SERVICE_STOP_COVER, self._entity_ids)
 
     async def _async_move_to(self, hemline: float) -> None:
         # Shades may not report position until they stop, so while our own
         # motion is running, plan from where we estimate the shades are.
+        estimated = self._moving
         positions = self._estimated_positions()
+        if missing := [e for e in self._entity_ids if e not in positions]:
+            _LOGGER.warning(
+                "%s: leaving out shades with no position: %s",
+                self.entity_id,
+                ", ".join(missing),
+            )
         self._cancel_motion()
         plan = self._group.plan(positions, hemline, self._pico is not None)
+        _LOGGER.debug(
+            "%s: hemline %.1f from %s positions %s -> Pico %s%s, moves %s, %.1fs",
+            self.entity_id,
+            hemline,
+            "estimated" if estimated else "reported",
+            {e: round(p, 1) for e, p in positions.items()},
+            plan.pico,
+            f" ({plan.pico_blocker})" if plan.pico_blocker else "",
+            [f"{m.entity_id}->{m.position}@{m.delay:.1f}s" for m in plan.moves],
+            plan.duration,
+        )
         if not plan.moves and plan.pico is None:
             self.async_write_ha_state()
             return
@@ -256,7 +285,10 @@ class AlignedCoverGroup(CoverEntity):
         now = [move for move in plan.moves if move.delay <= 0]
         await self._async_set_positions(now)
         if generation != self._generation:
-            # Stopped or retargeted while the first commands were in flight.
+            _LOGGER.debug(
+                "%s: superseded while starting; not scheduling delayed moves",
+                self.entity_id,
+            )
             return
 
         for move in plan.moves:
@@ -273,10 +305,14 @@ class AlignedCoverGroup(CoverEntity):
         )
 
     async def _async_delayed_move(self, move: Move, _now: datetime) -> None:
+        _LOGGER.debug(
+            "%s: starting %s -> %s", self.entity_id, move.entity_id, move.position
+        )
         await self._async_set_positions([move])
 
     @callback
     def _async_motion_done(self, _now: datetime) -> None:
+        _LOGGER.debug("%s: motion finished", self.entity_id)
         self._timers.clear()
         self._travel.clear()
         self._moving = False
