@@ -22,20 +22,13 @@ def same_tops(position_pct: int = 0) -> list[ShadeSpec]:
     return [ShadeSpec.from_config(config, SPEED, position_pct) for config in SHADES]
 
 
-both_reporting_modes = pytest.mark.parametrize(
-    "report_while_moving", [True, False], ids=["reports-moving", "reports-at-rest"]
-)
-
-
-@both_reporting_modes
 @pytest.mark.parametrize("pico", [True, False], ids=["pico", "no-pico"])
 async def test_open_from_closed_stays_aligned(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     pico: bool,
-    report_while_moving: bool,
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(0), pico, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(0), pico)
     assert room.group.state == "closed"
 
     await room.command("open_cover")
@@ -55,11 +48,10 @@ async def test_open_from_closed_stays_aligned(
         assert room.pico["open"].presses == 0
 
 
-@both_reporting_modes
 async def test_close_from_open_uses_pico_in_lockstep(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, report_while_moving: bool
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(100), True, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(100), True)
 
     await room.command("close_cover")
     await room.run_until_still()
@@ -71,11 +63,10 @@ async def test_close_from_open_uses_pico_in_lockstep(
     assert room.group.state == "closed"
 
 
-@both_reporting_modes
 async def test_partial_close_then_reopen(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, report_while_moving: bool
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(100), True, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(100), True)
 
     await room.command("set_cover_position", position=50)
     await room.run_until_still()
@@ -93,11 +84,10 @@ async def test_partial_close_then_reopen(
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
-@both_reporting_modes
 async def test_stop_during_staggered_open(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, report_while_moving: bool
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(0), True, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(0), True)
 
     await room.command("open_cover")
     await room.run(3)  # low-sill shade is moving; high-sill hasn't started
@@ -112,11 +102,10 @@ async def test_stop_during_staggered_open(
     assert room.group.attributes["aligned"] is True
 
 
-@both_reporting_modes
 async def test_stop_while_aligned_and_moving(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, report_while_moving: bool
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(100), True, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(100), True)
 
     await room.command("close_cover")
     await room.run(10)
@@ -142,11 +131,10 @@ async def test_stop_while_idle_does_not_trigger_favorite(
     assert all(shade.position_pct != FAVORITE for shade in room.shades.values())
 
 
-@both_reporting_modes
 async def test_reverse_while_opening(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, report_while_moving: bool
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(0), True, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(0), True)
 
     await room.command("open_cover")
     await room.run(15)  # both shades moving up
@@ -157,11 +145,10 @@ async def test_reverse_while_opening(
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
-@both_reporting_modes
 async def test_retarget_while_moving(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, report_while_moving: bool
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(100), True, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(100), True)
 
     await room.command("close_cover")
     await room.run(5)
@@ -172,13 +159,11 @@ async def test_retarget_while_moving(
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
-@both_reporting_modes
 @pytest.mark.parametrize("pico", [True, False], ids=["pico", "no-pico"])
 async def test_different_tops_and_sills(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     pico: bool,
-    report_while_moving: bool,
 ) -> None:
     # Shades offset vertically, same speed (2 in/s).
     room = await build_room(
@@ -186,7 +171,6 @@ async def test_different_tops_and_sills(
         freezer,
         [ShadeSpec("left", 10, 60, 25, 0), ShadeSpec("right", 20, 80, 30, 0)],
         pico,
-        report_while_moving,
     )
 
     await room.command("set_cover_position", position=50)  # hemline 45
@@ -280,12 +264,11 @@ async def test_all_shades_unavailable(
     assert room.group.state == "closed"
 
 
-@both_reporting_modes
 async def test_shades_moving_opposite_ways(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, report_while_moving: bool
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
     # Out of line: hemlines at 54 and 48 (group at 54%).
-    room = await build_room(hass, freezer, same_tops(50), True, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(50), True)
     assert room.group.attributes["aligned"] is False
     assert room.group.attributes["current_position"] == 54
 
@@ -301,7 +284,6 @@ async def test_shades_moving_opposite_ways(
     assert room.group.attributes["current_position"] == 56
 
 
-@both_reporting_modes
 @pytest.mark.parametrize("pico", [True, False], ids=["pico", "no-pico"])
 @pytest.mark.parametrize(
     ("service", "end_pct", "end_state"),
@@ -321,7 +303,6 @@ async def test_open_and_close_from_shuffled_positions(
     end_pct: int,
     end_state: str,
     pico: bool,
-    report_while_moving: bool,
 ) -> None:
     # Three shades of different sizes and speeds, starting out of line.
     specs = [
@@ -329,7 +310,7 @@ async def test_open_and_close_from_shuffled_positions(
         ShadeSpec("b", 12, 84, 36, start_pcts[1]),
         ShadeSpec("c", 30, 72, 15, start_pcts[2]),
     ]
-    room = await build_room(hass, freezer, specs, pico, report_while_moving)
+    room = await build_room(hass, freezer, specs, pico)
 
     await room.command(service)
     await room.run_until_still()
@@ -340,15 +321,13 @@ async def test_open_and_close_from_shuffled_positions(
     assert room.group.attributes["aligned"] is True
 
 
-@both_reporting_modes
 @pytest.mark.parametrize("pico", [True, False], ids=["pico", "no-pico"])
 async def test_retarget_to_where_the_shades_are(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     pico: bool,
-    report_while_moving: bool,
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(100), pico, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(100), pico)
 
     await room.command("close_cover")
     await room.run(10)  # hemlines at 64: low-sill shade at 72%
@@ -361,15 +340,13 @@ async def test_retarget_to_where_the_shades_are(
     assert room.group.attributes["current_position"] == 72
 
 
-@both_reporting_modes
 @pytest.mark.parametrize("pico", [True, False], ids=["pico", "no-pico"])
 async def test_staggered_start_with_slow_commands(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     pico: bool,
-    report_while_moving: bool,
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(0), pico, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(0), pico)
     room.bridge.latency_s = 1.0
 
     await room.command("open_cover")
@@ -384,15 +361,13 @@ async def test_staggered_start_with_slow_commands(
     assert room.positions_pct_by_id() == {HIGH_SILL: 100, LOW_SILL: 100}
 
 
-@both_reporting_modes
 @pytest.mark.parametrize("pico", [True, False], ids=["pico", "no-pico"])
 async def test_retarget_while_a_staggered_start_is_pending(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     pico: bool,
-    report_while_moving: bool,
 ) -> None:
-    room = await build_room(hass, freezer, same_tops(0), pico, report_while_moving)
+    room = await build_room(hass, freezer, same_tops(0), pico)
 
     await room.command("open_cover")
     await room.run(3)  # low-sill shade moving; high-sill shade not started yet
@@ -447,51 +422,6 @@ async def test_failed_command(
     assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
 
 
-@both_reporting_modes
-async def test_motion_ends_when_the_shades_arrive(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, report_while_moving: bool
-) -> None:
-    # Configured slower than the shades really are: they arrive early.
-    room = await build_room(
-        hass,
-        freezer,
-        same_tops(100),
-        report_while_moving=report_while_moving,
-        configured_travel_time_s=45,
-    )
-
-    await room.command("close_cover")
-    await room.run(37)  # shades closed at 36 s; planned end is 45 s + margin
-    assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
-    assert room.group.state == "closed"
-
-    # So a stop now isn't mistaken for one during the move.
-    await room.command("stop_cover")
-    await room.run(10)
-    assert room.pico["stop"].presses == 0
-    assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
-
-
-async def test_warns_when_shades_arrive_late(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    # Configured faster than the shades really are: the planned end passes
-    # before they arrive.
-    room = await build_room(hass, freezer, same_tops(100), configured_travel_time_s=30)
-
-    with caplog.at_level(logging.WARNING):
-        await room.command("close_cover")
-        await room.run(33)
-    assert "didn't arrive" in caplog.text
-    assert LOW_SILL in caplog.text
-    assert room.group.state != "closing"
-
-    await room.run_until_still()
-    assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
-
-
 async def test_options_change_mid_move(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
@@ -524,3 +454,65 @@ async def test_group_has_its_own_service_device(
     assert device.name == "Living Room"
     assert device.entry_type is dr.DeviceEntryType.SERVICE
     assert device.config_entries == {room.entry.entry_id}
+
+
+async def test_motion_ends_at_the_planned_end(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    # Configured slower than the shades really are. They report their
+    # destination immediately, so the group can't tell they arrived early.
+    room = await build_room(hass, freezer, same_tops(100), configured_travel_time_s=45)
+
+    await room.command("close_cover")
+    await room.run(40)  # shades closed at 36 s
+    assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
+    assert room.group.state == "closing"
+
+    await room.run(8)  # planned end 45 s, plus margin
+    assert room.group.state == "closed"
+    await room.command("stop_cover")
+    await room.run(10)
+    assert room.pico["stop"].presses == 0
+    assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
+
+
+async def test_outside_command_takes_over(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    room = await build_room(hass, freezer, same_tops(0), pico=False)
+
+    await room.command("open_cover")
+    await room.run(3)  # high-sill shade's start still pending
+    with caplog.at_level(logging.INFO):
+        # Someone else sends the low-sill shade somewhere.
+        await hass.services.async_call(
+            "cover",
+            "set_cover_position",
+            {"entity_id": LOW_SILL, "position": 20},
+            blocking=True,
+        )
+    assert "another command took over" in caplog.text
+    assert room.group.state != "opening"
+
+    await room.run(20)
+    assert room[HIGH_SILL].starts == []
+    assert room.positions_pct_by_id()[LOW_SILL] == 20
+
+
+async def test_physical_pico_stop_takes_over(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    room = await build_room(hass, freezer, same_tops(100))
+
+    await room.command("close_cover")
+    await room.run(10)
+    # Someone presses Stop on the Pico itself.
+    await hass.services.async_call(
+        "button", "press", {"entity_id": room.pico["stop"].entity_id}, blocking=True
+    )
+    await room.run(1)
+
+    assert room.group.state not in ("opening", "closing")
+    assert room.positions_pct_by_id() == {HIGH_SILL: 67, LOW_SILL: 72}

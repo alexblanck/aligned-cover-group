@@ -63,12 +63,12 @@ drift apart mid-move.
 
 ## Motion
 
-Commands are open-loop: Caseta shades don't reliably report position while
-moving (nor opening/closing), so timing comes from the shared speed. While the
-group's own motion is running, a new command plans from *estimated* positions
-(start position, start time, speed) rather than the last reported ones, so
-reversing or retargeting mid-move works even if shades only report when they
-stop. A shade still on an earlier trip that already sits at its new target is
+Commands are open-loop. Caseta shades report their *destination* as soon as
+they're commanded (and their real position only when stopped), never
+opening/closing, so timing comes from the shared speed. While the group's own
+motion is running, a new command plans from *estimated* positions (start
+position, start time, speed) rather than the reported ones, which already show
+the destinations. A shade still on an earlier trip that already sits at its new target is
 sent a command to hold there, otherwise it would carry on to its old target.
 
 **Pico path** — used when a Pico is configured *and* every shade the Pico would
@@ -82,10 +82,12 @@ vice versa for moving down). Implemented as delayed `set_position` calls.
 
 Delayed starts and the end of the move are scheduled at absolute times from
 when the move began, so slow commands to the bridge don't push later starts
-back. A move ends when every shade has reported reaching its target; if the
-planned end (plus a 2 s margin) passes first, the group stops treating the
-shades as moving and logs a warning naming the late shades. If a starting
-command fails, the move is abandoned and the error returned to the caller.
+back. A move ends at its planned end plus a 2 s margin: since shades report
+their destination immediately, there's no way to see them actually arrive. If
+a shade reports a position that isn't part of the plan (another command, such
+as a physical Pico press, took over), the group stops following its plan. If a
+starting command fails, the move is abandoned and the error returned to the
+caller.
 
 **Stop** — cancel any pending staggered starts, then:
 - Pico configured and the group believes it is moving → press Pico stop.

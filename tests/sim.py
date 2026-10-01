@@ -1,9 +1,11 @@
 """A simulated room of Lutron shades and a Pico, driven through real HA services.
 
-Shades move over (frozen, manually advanced) time at their travel speed. The
-Pico behaves like a Caseta shade Pico paired on the bridge: Up/Down send every
-paired shade to open/closed at the same instant, and the middle button stops
-moving shades but sends stationary shades to their favorite position.
+Shades move over (frozen, manually advanced) time at their travel speed. Like
+Caseta shades, they report their destination as soon as they're commanded, and
+their real position only when stopped. The Pico behaves like a Caseta shade
+Pico paired on the bridge: Up/Down send every paired shade to open/closed at
+the same instant, and the middle button stops moving shades but sends
+stationary shades to their favorite position.
 """
 
 from __future__ import annotations
@@ -98,9 +100,7 @@ class SimShade(CoverEntity):
         | CoverEntityFeature.SET_POSITION
     )
 
-    def __init__(
-        self, spec: ShadeSpec, report_while_moving: bool, bridge: Bridge
-    ) -> None:
+    def __init__(self, spec: ShadeSpec, bridge: Bridge) -> None:
         self.spec = spec
         self._bridge = bridge
         self.entity_id = spec.entity_id
@@ -109,7 +109,6 @@ class SimShade(CoverEntity):
         # The motor's true position: fractional, unlike what HA reports.
         self.position_pct = float(spec.position_pct)
         self.target_pct = self.position_pct
-        self._report_while_moving = report_while_moving
         self._reported = round(self.position_pct)
         self._last = dt_util.utcnow()
         # (time, target_pct) log of motion starts, for synchronization checks.
@@ -143,14 +142,13 @@ class SimShade(CoverEntity):
             self.position_pct = min(self.target_pct, self.position_pct + step_pct)
         elif self.target_pct < self.position_pct:
             self.position_pct = max(self.target_pct, self.position_pct - step_pct)
-        if self._report_while_moving or not self.moving:
-            self._reported = round(self.position_pct)
 
     def go(self, target_pct: float) -> None:
         self.settle()
         if not self.moving and target_pct != self.position_pct:
             self.starts.append((dt_util.utcnow().timestamp(), target_pct))
         self.target_pct = target_pct
+        self._reported = round(target_pct)
         self.async_write_ha_state()
 
     def stop(self) -> None:
@@ -368,12 +366,11 @@ async def build_room(
     freezer: FrozenDateTimeFactory,
     specs: list[ShadeSpec],
     pico: bool = True,
-    report_while_moving: bool = True,
     configured_travel_time_s: float | None = None,
 ) -> Room:
     """Set up simulated shades (and Pico), then the group via its config flow."""
     bridge = Bridge(freezer)
-    shades = [SimShade(spec, report_while_moving, bridge) for spec in specs]
+    shades = [SimShade(spec, bridge) for spec in specs]
     setup_test_component_platform(hass, "cover", shades)
     assert await async_setup_component(hass, "cover", {"cover": {"platform": "test"}})
     buttons = None

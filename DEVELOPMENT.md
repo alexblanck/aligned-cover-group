@@ -64,8 +64,8 @@ Most bugs are at the seams, so tests favor whole flows over individual methods.
   and races.
 - [tests/test_room.py](tests/test_room.py) drives the group like a user and
   checks hemline alignment after every tick, using math independent of the
-  integration's. Scenarios run with shades that report position while moving
-  and shades that only report when stopped.
+  integration's. Simulated shades report like Caseta shades: their destination
+  as soon as they're commanded, and their real position only when stopped.
 - [tests/test_alignment.py](tests/test_alignment.py) keeps only edge cases of
   the math that are awkward to reach end to end;
   [tests/test_config_flow.py](tests/test_config_flow.py) covers validation
@@ -79,8 +79,7 @@ When adding or changing behavior:
   the whole run, Pico presses, group state). Avoid asserting on internal
   method calls.
 - If the real hardware does something the simulator doesn't model, extend
-  `sim.py` to model it rather than working around it in a test. Run new
-  scenarios in both position-reporting modes unless only one applies.
+  `sim.py` to model it rather than working around it in a test.
 - Add a unit test only when the math is subtle and hard to reach end to end.
 
 The simulator fires timers with `async_fire_time_changed_exact`: the plain

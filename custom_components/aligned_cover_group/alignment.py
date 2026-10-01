@@ -296,7 +296,7 @@ def _staggered(trips: list[Trip]) -> list[Trip]:
     return [
         replace(
             trip,
-            delay_s=sign * (trip.from_height - leader.from_height) / leader.shade.speed,
+            delay_s=abs(trip.from_height - leader.from_height) / leader.shade.speed,
         )
         for trip in trips
     ]
