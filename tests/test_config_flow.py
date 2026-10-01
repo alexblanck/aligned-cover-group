@@ -28,17 +28,23 @@ async def start_flow(hass: HomeAssistant) -> dict[str, Any]:
 
 
 async def submit_group(
-    hass: HomeAssistant, flow: dict[str, Any], **extra: Any
+    hass: HomeAssistant, flow: dict[str, Any], **pico: str
 ) -> dict[str, Any]:
     return await hass.config_entries.flow.async_configure(
-        flow["flow_id"], {"name": "x", "covers": [HIGH_SILL, LOW_SILL], **extra}
+        flow["flow_id"],
+        {"name": "x", "covers": [HIGH_SILL, LOW_SILL], "pico": pico},
     )
+
+
+async def test_pico_section_starts_collapsed(hass: HomeAssistant) -> None:
+    flow = await start_flow(hass)
+    assert flow["data_schema"].schema["pico"].options["collapsed"] is True
 
 
 async def test_too_few_covers(hass: HomeAssistant) -> None:
     flow = await start_flow(hass)
     result = await hass.config_entries.flow.async_configure(
-        flow["flow_id"], {"name": "x", "covers": [HIGH_SILL]}
+        flow["flow_id"], {"name": "x", "covers": [HIGH_SILL], "pico": {}}
     )
     assert result["errors"] == {"base": "too_few_covers"}
 

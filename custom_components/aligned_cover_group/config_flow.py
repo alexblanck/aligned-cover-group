@@ -21,6 +21,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
@@ -31,6 +32,7 @@ from .const import (
     CONF_TRAVEL_TIME_S,
     DOMAIN,
     PICO_BUTTONS,
+    PICO_SECTION,
 )
 
 _HEIGHT = selector.NumberSelector(
@@ -59,21 +61,31 @@ TRAVEL_SCHEMA = vol.Schema(
 )
 
 
-def _group_schema(exclude: list[str]) -> vol.Schema:
-    """Schema for choosing the covers and optional Pico buttons."""
+def _group_schema(exclude: list[str], pico_collapsed: bool) -> vol.Schema:
+    """Schema for choosing the covers and, in a section, optional Pico buttons."""
     button = selector.EntitySelector(
         selector.EntitySelectorConfig(domain="button", integration="lutron_caseta")
     )
-    fields: dict[vol.Marker, Any] = {
-        vol.Required(CONF_COVERS): selector.EntitySelector(
-            selector.EntitySelectorConfig(
-                domain="cover", multiple=True, exclude_entities=exclude
-            )
-        ),
-    }
-    for key in PICO_BUTTONS:
-        fields[vol.Optional(key)] = button
-    return vol.Schema(fields)
+    return vol.Schema(
+        {
+            vol.Required(CONF_COVERS): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="cover", multiple=True, exclude_entities=exclude
+                )
+            ),
+            vol.Required(PICO_SECTION): section(
+                vol.Schema({vol.Optional(key): button for key in PICO_BUTTONS}),
+                {"collapsed": pico_collapsed},
+            ),
+        }
+    )
+
+
+def _flatten_pico(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Group input with the Pico section's buttons moved to the top level."""
+    pico: dict[str, Any] = user_input.get(PICO_SECTION, {})
+    flat = {key: value for key, value in user_input.items() if key != PICO_SECTION}
+    return flat | pico
 
 
 REQUIRED_FEATURES = CoverEntityFeature.SET_POSITION | CoverEntityFeature.STOP
@@ -222,15 +234,16 @@ class AlignedCoverGroupConfigFlow(_ShadeSteps, ConfigFlow, domain=DOMAIN):
         """Choose a name, the covers and an optional Pico."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            if error := _validate_group(self.hass, user_input):
+            group = _flatten_pico(user_input)
+            if error := _validate_group(self.hass, group):
                 errors["base"] = error
             else:
-                self._name = user_input.pop(CONF_NAME)
-                self._start_shades(user_input)
+                self._name = group.pop(CONF_NAME)
+                self._start_shades(group)
                 return await self.async_step_shade()
 
         schema = vol.Schema({vol.Required(CONF_NAME): selector.TextSelector()}).extend(
-            _group_schema([]).schema
+            _group_schema([], pico_collapsed=True).schema
         )
         return self.async_show_form(
             step_id="user",
@@ -257,10 +270,11 @@ class AlignedCoverGroupOptionsFlow(_ShadeSteps, OptionsFlowWithReload):
         self._previous_travel_time_s = options.get(CONF_TRAVEL_TIME_S)
         errors: dict[str, str] = {}
         if user_input is not None:
-            if error := _validate_group(self.hass, user_input):
+            group = _flatten_pico(user_input)
+            if error := _validate_group(self.hass, group):
                 errors["base"] = error
             else:
-                self._start_shades(user_input)
+                self._start_shades(group)
                 return await self.async_step_shade()
 
         own_entities = [
@@ -269,14 +283,15 @@ class AlignedCoverGroupOptionsFlow(_ShadeSteps, OptionsFlowWithReload):
                 er.async_get(self.hass), self.config_entry.entry_id
             )
         ]
-        suggested = user_input or (
-            {key: options[key] for key in PICO_BUTTONS if key in options}
-            | {CONF_COVERS: list(self._previous)}
-        )
+        pico = {key: options[key] for key in PICO_BUTTONS if key in options}
+        suggested = user_input or {
+            CONF_COVERS: list(self._previous),
+            PICO_SECTION: pico,
+        }
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
-                _group_schema(own_entities), suggested
+                _group_schema(own_entities, pico_collapsed=not pico), suggested
             ),
             errors=errors,
         )

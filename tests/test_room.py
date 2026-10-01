@@ -211,8 +211,11 @@ async def test_options_change_applies_to_running_group(
 
     # Remove the Pico through the options flow; the group reloads without it.
     flow = await hass.config_entries.options.async_init(room.entry.entry_id)
+    # The Pico section opens expanded, since this group has one.
+    pico_section = flow["data_schema"].schema["pico"]
+    assert pico_section.options["collapsed"] is False
     flow = await hass.config_entries.options.async_configure(
-        flow["flow_id"], {"covers": [HIGH_SILL, LOW_SILL]}
+        flow["flow_id"], {"covers": [HIGH_SILL, LOW_SILL], "pico": {}}
     )
     flow = await room.answer_shade_steps(
         flow, hass.config_entries.options.async_configure
@@ -496,7 +499,7 @@ async def test_options_change_mid_move(
     await room.run(3)  # high-sill shade's start still pending
     flow = await hass.config_entries.options.async_init(room.entry.entry_id)
     flow = await hass.config_entries.options.async_configure(
-        flow["flow_id"], {"covers": [HIGH_SILL, LOW_SILL]}
+        flow["flow_id"], {"covers": [HIGH_SILL, LOW_SILL], "pico": {}}
     )
     flow = await room.answer_shade_steps(
         flow, hass.config_entries.options.async_configure

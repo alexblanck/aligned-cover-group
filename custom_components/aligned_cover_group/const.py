@@ -11,3 +11,5 @@ CONF_PICO_STOP = "pico_stop"
 CONF_PICO_CLOSE = "pico_close"
 
 PICO_BUTTONS = (CONF_PICO_OPEN, CONF_PICO_STOP, CONF_PICO_CLOSE)
+# Form section holding the Pico buttons; stored flattened in the options.
+PICO_SECTION = "pico"

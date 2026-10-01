@@ -244,14 +244,11 @@ class Room:
         flow = await self.hass.config_entries.flow.async_init(
             DOMAIN, context={"source": "user"}
         )
-        group_input: dict[str, Any] = {
-            "name": "Living Room",
-            "covers": list(self.shades),
+        pico = {
+            f"pico_{role}": button.entity_id
+            for role, button in (self.pico or {}).items()
         }
-        if self.pico:
-            group_input |= {
-                f"pico_{role}": button.entity_id for role, button in self.pico.items()
-            }
+        group_input = {"name": "Living Room", "covers": list(self.shades), "pico": pico}
         flow = await self.hass.config_entries.flow.async_configure(
             flow["flow_id"], group_input
         )
