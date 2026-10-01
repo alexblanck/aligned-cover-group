@@ -105,7 +105,6 @@ class Plan:
 
     pico: Direction | None
     trips: tuple[Trip, ...]
-    direction: Direction | None
     pico_blocker: str | None = None
 
     @property
@@ -114,7 +113,7 @@ class Plan:
         return max((trip.arrival_s for trip in self.trips), default=0.0)
 
 
-class Group:
+class AlignmentGroup:
     """A set of shades whose hemlines are kept aligned.
 
     The group's own position runs from the lowest closed height (0%) to the
@@ -142,70 +141,76 @@ class Group:
         position_pct = (hemline_height - self.closed_height) / span * 100
         return round(min(100.0, max(0.0, position_pct)))
 
-    def common_hemline_height(self, positions_pct: Mapping[str, int]) -> float | None:
+    def common_hemline_height(
+        self, positions_pct_by_id: Mapping[str, int]
+    ) -> float | None:
         """The group hemline height that would put every shade where it is.
 
         None if there isn't one, meaning the shades are misaligned.
         """
-        height = self._candidate_hemline_height(positions_pct)
+        height = self._candidate_hemline_height(positions_pct_by_id)
         if height is None:
             return None
-        for shade in self._shades_for(positions_pct.keys()):
-            actual_height = shade.hemline_height(positions_pct[shade.entity_id])
+        for shade in self._shades_for(positions_pct_by_id.keys()):
+            actual_height = shade.hemline_height(positions_pct_by_id[shade.entity_id])
             if abs(actual_height - shade.clamp(height)) > self.height_tolerance:
                 return None
         return height
 
     def _candidate_hemline_height(
-        self, positions_pct: Mapping[str, int]
+        self, positions_pct_by_id: Mapping[str, int]
     ) -> float | None:
-        shades = self._shades_for(positions_pct.keys())
+        shades = self._shades_for(positions_pct_by_id.keys())
         partway = [
-            shade.hemline_height(positions_pct[shade.entity_id])
+            shade.hemline_height(positions_pct_by_id[shade.entity_id])
             for shade in shades
-            if 0 < positions_pct[shade.entity_id] < 100
+            if 0 < positions_pct_by_id[shade.entity_id] < 100
         ]
         if partway:
             return sum(partway) / len(partway)
-        if all(positions_pct[shade.entity_id] <= 0 for shade in shades):
+        if all(positions_pct_by_id[shade.entity_id] <= 0 for shade in shades):
             return self.closed_height
-        if all(positions_pct[shade.entity_id] >= 100 for shade in shades):
+        if all(positions_pct_by_id[shade.entity_id] >= 100 for shade in shades):
             return self.open_height
         return None
 
-    def reported_position_pct(self, positions_pct: Mapping[str, int]) -> int | None:
+    def current_group_position_pct(
+        self, positions_pct_by_id: Mapping[str, int]
+    ) -> int | None:
         """Group position to report for the given shade positions."""
-        shades = self._shades_for(positions_pct.keys())
+        shades = self._shades_for(positions_pct_by_id.keys())
         if not shades:
             return None
-        height = self.common_hemline_height(positions_pct)
+        height = self.common_hemline_height(positions_pct_by_id)
         if height is None:
             height = sum(
-                shade.hemline_height(positions_pct[shade.entity_id]) for shade in shades
+                shade.hemline_height(positions_pct_by_id[shade.entity_id])
+                for shade in shades
             ) / len(shades)
         return self.position_pct_for(height)
 
     def plan(
         self,
-        positions_pct: Mapping[str, int],
-        target_height: float,
+        positions_pct_by_id: Mapping[str, int],
+        target_pct: int,
         pico_available: bool,
     ) -> Plan:
-        """Plan the trips that bring every shade's hemline to `target_height`."""
+        """Plan the trips that bring the group to `target_pct`."""
+        target_height = self.hemline_height_for(target_pct)
         trips = [
             trip
-            for shade in self._shades_for(positions_pct.keys())
+            for shade in self._shades_for(positions_pct_by_id.keys())
             if (
                 trip := Trip(
                     shade,
-                    positions_pct[shade.entity_id],
+                    positions_pct_by_id[shade.entity_id],
                     shade.position_pct_for(target_height),
                 )
             ).from_pct
             != trip.target_pct
         ]
         if not trips:
-            return Plan(pico=None, trips=(), direction=None)
+            return Plan(pico=None, trips=())
         directions = {trip.direction for trip in trips}
         direction = directions.pop() if len(directions) == 1 else None
 
@@ -214,7 +219,7 @@ class Group:
             if direction is None:
                 blocker = "shades are moving in different directions"
             else:
-                blocker = self._pico_blocker(positions_pct, direction, len(trips))
+                blocker = self._pico_blocker(positions_pct_by_id, direction, len(trips))
                 if blocker is None:
                     return _pico_plan(direction, trips)
 
@@ -229,12 +234,14 @@ class Group:
         return Plan(
             pico=None,
             trips=tuple(staggered),
-            direction=direction,
             pico_blocker=blocker,
         )
 
     def _pico_blocker(
-        self, positions_pct: Mapping[str, int], direction: Direction, moving_count: int
+        self,
+        positions_pct_by_id: Mapping[str, int],
+        direction: Direction,
+        moving_count: int,
     ) -> str | None:
         """Why a Pico press can't be used, or None if it's safe.
 
@@ -242,13 +249,13 @@ class Group:
         so all of those must need to move and share a hemline height (and all
         positions must be known).
         """
-        if len(self._shades_for(positions_pct.keys())) != len(self.shades):
+        if len(self._shades_for(positions_pct_by_id.keys())) != len(self.shades):
             return "some shade positions are unknown"
         endpoint_pct = 100 if direction is Direction.OPENING else 0
         heights = [
-            shade.hemline_height(positions_pct[shade.entity_id])
+            shade.hemline_height(positions_pct_by_id[shade.entity_id])
             for shade in self.shades
-            if positions_pct[shade.entity_id] != endpoint_pct
+            if positions_pct_by_id[shade.entity_id] != endpoint_pct
         ]
         if len(heights) != moving_count:
             return "it would move a shade that is already in place"
@@ -296,5 +303,4 @@ def _pico_plan(direction: Direction, trips: list[Trip]) -> Plan:
             replace(trip, needs_command=trip.target_pct != endpoint_pct)
             for trip in trips
         ),
-        direction=direction,
     )

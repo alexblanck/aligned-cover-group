@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -40,7 +41,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from .alignment import Direction, Group, Plan, Shade, Trip
+from .alignment import AlignmentGroup, Direction, Plan, Shade, Trip
 from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
@@ -52,6 +53,8 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+ATTR_HEMLINE_HEIGHTS = "hemline_heights"
 
 # Extra time after the planned motion before the group reports it has stopped.
 MOTION_END_MARGIN_S = 2.0
@@ -74,6 +77,19 @@ class _Travel:
         return round(max(self.to_pct, self.from_pct - moved_pct))
 
 
+@dataclass(frozen=True)
+class PicoButtons:
+    """Button entities of a Pico paired to exactly the group's shades."""
+
+    open: str
+    stop: str
+    close: str
+
+    def toward(self, direction: Direction) -> str:
+        """The button that sends every shade toward that direction's end."""
+        return self.open if direction is Direction.OPENING else self.close
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -81,7 +97,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the aligned cover group entity."""
     options = entry.options
-    group = Group(
+    group = AlignmentGroup(
         Shade(
             entity_id=shade[CONF_ENTITY_ID],
             closed_height=shade[CONF_CLOSED_HEIGHT],
@@ -92,11 +108,11 @@ async def async_setup_entry(
     )
     pico = None
     if options.get(CONF_PICO_OPEN):
-        pico = {
-            Direction.OPENING: options[CONF_PICO_OPEN],
-            Direction.CLOSING: options[CONF_PICO_CLOSE],
-            None: options[CONF_PICO_STOP],
-        }
+        pico = PicoButtons(
+            open=options[CONF_PICO_OPEN],
+            stop=options[CONF_PICO_STOP],
+            close=options[CONF_PICO_CLOSE],
+        )
     async_add_entities([AlignedCoverGroup(entry, group, pico)])
 
 
@@ -105,6 +121,8 @@ class AlignedCoverGroup(CoverEntity):
 
     _attr_should_poll = False
     _attr_device_class = CoverDeviceClass.SHADE
+    # Derived from the shades' own recorded states; no need to store them too.
+    _unrecorded_attributes = frozenset({ATTR_ENTITY_ID, ATTR_HEMLINE_HEIGHTS})
     _attr_supported_features = (
         CoverEntityFeature.OPEN
         | CoverEntityFeature.CLOSE
@@ -115,8 +133,8 @@ class AlignedCoverGroup(CoverEntity):
     def __init__(
         self,
         entry: ConfigEntry,
-        group: Group,
-        pico: dict[Direction | None, str] | None,
+        group: AlignmentGroup,
+        pico: PicoButtons | None,
     ) -> None:
         """Initialize the group."""
         self._attr_name = entry.title
@@ -124,7 +142,7 @@ class AlignedCoverGroup(CoverEntity):
         self._group = group
         self._pico = pico
         self._entity_ids = [shade.entity_id for shade in group.shades]
-        self._positions_pct: dict[str, int] = {}
+        self._positions_pct_by_id: dict[str, int] = {}
         # Set while a planned motion is (believed to be) in progress.
         self._moving = False
         self._direction: Direction | None = None
@@ -141,41 +159,44 @@ class AlignedCoverGroup(CoverEntity):
                 self.hass, self._entity_ids, self._async_member_changed
             )
         )
-        self.async_on_remove(self._cancel_motion)
-        self._update_positions_pct()
+        self.async_on_remove(self._abandon_plan)
+        self._update_positions_pct_by_id()
 
     @callback
     def _async_member_changed(self, event: Event[EventStateChangedData]) -> None:
-        self._update_positions_pct()
+        self._update_positions_pct_by_id()
         self.async_write_ha_state()
 
     @callback
-    def _update_positions_pct(self) -> None:
-        self._positions_pct = {}
-        for entity_id in self._entity_ids:
-            state = self.hass.states.get(entity_id)
-            if state is None:
-                continue
-            position_pct = state.attributes.get(ATTR_CURRENT_POSITION)
-            if position_pct is not None:
-                self._positions_pct[entity_id] = int(position_pct)
+    def _update_positions_pct_by_id(self) -> None:
+        self._positions_pct_by_id = {
+            entity_id: position_pct
+            for entity_id in self._entity_ids
+            if (position_pct := self._current_shade_position_pct(entity_id)) is not None
+        }
+
+    def _current_shade_position_pct(self, entity_id: str) -> int | None:
+        if (state := self.hass.states.get(entity_id)) is None:
+            return None
+        position_pct = state.attributes.get(ATTR_CURRENT_POSITION)
+        return None if position_pct is None else int(position_pct)
 
     @property
     def available(self) -> bool:
         """Available while any shade reports a position."""
-        return bool(self._positions_pct)
+        return bool(self._positions_pct_by_id)
 
     @property
     def current_cover_position(self) -> int | None:
         """Group position derived from the shades' hemlines."""
-        return self._group.reported_position_pct(self._positions_pct)
+        return self._group.current_group_position_pct(self._positions_pct_by_id)
 
     @property
     def is_closed(self) -> bool | None:
         """Closed when every shade is closed."""
-        if not self._positions_pct:
+        if not self._positions_pct_by_id:
             return None
-        return all(pct <= 0 for pct in self._positions_pct.values())
+        return all(pct <= 0 for pct in self._positions_pct_by_id.values())
 
     @property
     def is_opening(self) -> bool:
@@ -189,66 +210,79 @@ class AlignedCoverGroup(CoverEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose members and alignment."""
+        """Expose members and alignment.
+
+        Members go in `entity_id` rather than HA's `group_entities`: that comes
+        from setting `self.group`, which makes HA send service calls straight
+        to the members, bypassing alignment and the Pico.
+        """
         return {
             ATTR_ENTITY_ID: self._entity_ids,
             "aligned": (
-                self._group.common_hemline_height(self._positions_pct) is not None
+                self._group.common_hemline_height(self._positions_pct_by_id) is not None
             ),
+            ATTR_HEMLINE_HEIGHTS: {
+                shade.entity_id: round(
+                    shade.hemline_height(self._positions_pct_by_id[shade.entity_id]), 1
+                )
+                for shade in self._group.shades
+                if shade.entity_id in self._positions_pct_by_id
+            },
         }
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open every shade."""
-        await self._async_move_to(self._group.open_height)
+        await self._async_move_to(100)
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close every shade."""
-        await self._async_move_to(self._group.closed_height)
+        await self._async_move_to(0)
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Move the shared hemline to a group position."""
-        await self._async_move_to(self._group.hemline_height_for(kwargs[ATTR_POSITION]))
+        await self._async_move_to(kwargs[ATTR_POSITION])
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop every shade at once."""
         was_moving = self._moving
-        self._cancel_motion()
+        self._abandon_plan()
         self.async_write_ha_state()
         # A shade Pico's middle button goes to the favorite position when the
         # shades are stationary, so only press it while we think they're moving.
         if self._pico and was_moving:
-            _LOGGER.debug("%s: stopping with Pico %s", self.entity_id, self._pico[None])
-            await self._async_call(BUTTON_DOMAIN, SERVICE_PRESS, self._pico[None])
+            await self._async_press(self._pico.stop)
         else:
+            took_s = await self._async_call(
+                COVER_DOMAIN, SERVICE_STOP_COVER, self._entity_ids
+            )
             _LOGGER.debug(
-                "%s: stopping each shade (%s)",
+                "%s: stopped each shade (%s) in %.3fs",
                 self.entity_id,
                 "no Pico"
                 if not self._pico
                 else "not moving, Pico would go to favorite",
+                took_s,
             )
-            await self._async_call(COVER_DOMAIN, SERVICE_STOP_COVER, self._entity_ids)
 
-    async def _async_move_to(self, target_height: float) -> None:
-        # Shades may not report position until they stop, so while our own
-        # motion is running, plan from where we estimate the shades are.
-        estimated = self._moving
-        positions_pct = self._estimated_positions_pct()
-        if missing := [e for e in self._entity_ids if e not in positions_pct]:
+    async def _async_move_to(self, target_pct: int) -> None:
+        positions_pct_by_id, positions_source = self._planning_positions_pct_by_id()
+        if missing := [e for e in self._entity_ids if e not in positions_pct_by_id]:
             _LOGGER.warning(
                 "%s: leaving out shades with no position: %s",
                 self.entity_id,
                 ", ".join(missing),
             )
-        self._cancel_motion()
-        plan = self._group.plan(positions_pct, target_height, self._pico is not None)
+        self._abandon_plan()
+        plan = self._group.plan(positions_pct_by_id, target_pct, self._pico is not None)
+        direction = self._group_direction(positions_pct_by_id, target_pct)
         _LOGGER.debug(
-            "%s: hemline height %.1f from %s positions %s -> "
+            "%s: to %s%% (hemline height %.1f) from %s positions %s -> "
             "Pico %s%s, trips %s, %.1fs",
             self.entity_id,
-            target_height,
-            "estimated" if estimated else "reported",
-            positions_pct,
+            target_pct,
+            self._group.hemline_height_for(target_pct),
+            positions_source,
+            positions_pct_by_id,
             plan.pico,
             f" ({plan.pico_blocker})" if plan.pico_blocker else "",
             [
@@ -258,15 +292,20 @@ class AlignedCoverGroup(CoverEntity):
             ],
             plan.duration_s,
         )
-        if not plan.trips:
-            self.async_write_ha_state()
-            return
-        await self._async_run(plan)
+        if plan.trips:
+            await self._async_run(plan, direction)
+        else:
+            self.async_write_ha_state()  # a previous move may have just been abandoned
 
     @callback
-    def _estimated_positions_pct(self) -> dict[str, int]:
+    def _planning_positions_pct_by_id(self) -> tuple[dict[str, int], str]:
+        """Shade positions to plan a move from, and their source.
+
+        Shades may not report position until they stop, so while our own move
+        is running these are estimates; otherwise they're what shades reported.
+        """
         if not self._moving:
-            return dict(self._positions_pct)
+            return dict(self._positions_pct_by_id), "reported"
         now = dt_util.utcnow()
         return {
             entity_id: (
@@ -274,13 +313,22 @@ class AlignedCoverGroup(CoverEntity):
                 if entity_id in self._travel
                 else position_pct
             )
-            for entity_id, position_pct in self._positions_pct.items()
-        }
+            for entity_id, position_pct in self._positions_pct_by_id.items()
+        }, "estimated"
 
-    async def _async_run(self, plan: Plan) -> None:
+    def _group_direction(
+        self, positions_pct_by_id: dict[str, int], target_pct: int
+    ) -> Direction | None:
+        """Which way the group's own position moves, whatever each shade does."""
+        current_pct = self._group.current_group_position_pct(positions_pct_by_id)
+        if current_pct is None or target_pct == current_pct:
+            return None
+        return Direction.OPENING if target_pct > current_pct else Direction.CLOSING
+
+    async def _async_run(self, plan: Plan, direction: Direction | None) -> None:
         generation = self._generation
         self._moving = True
-        self._direction = plan.direction
+        self._direction = direction
         now = dt_util.utcnow()
         self._travel = {
             trip.shade.entity_id: _Travel(
@@ -294,9 +342,10 @@ class AlignedCoverGroup(CoverEntity):
         self.async_write_ha_state()
 
         if plan.pico is not None and self._pico:
-            await self._async_call(BUTTON_DOMAIN, SERVICE_PRESS, self._pico[plan.pico])
+            await self._async_press(self._pico.toward(plan.pico))
         commands = [trip for trip in plan.trips if trip.needs_command]
         await self._async_set_positions(t for t in commands if t.delay_s <= 0)
+        # A stop or new move may have arrived while we awaited the commands.
         if generation != self._generation:
             _LOGGER.debug(
                 "%s: superseded while starting; not scheduling delayed starts",
@@ -321,12 +370,14 @@ class AlignedCoverGroup(CoverEntity):
             )
         )
 
-    async def _async_delayed_start(self, trip: Trip, _now: datetime) -> None:
+    async def _async_delayed_start(self, trip: Trip, now: datetime) -> None:
+        scheduled = self._travel[trip.shade.entity_id].start
         _LOGGER.debug(
-            "%s: starting %s -> %s%%",
+            "%s: starting %s -> %s%% (timer %+.3fs from schedule)",
             self.entity_id,
             trip.shade.entity_id,
             trip.target_pct,
+            (now - scheduled).total_seconds(),
         )
         await self._async_set_positions([trip])
 
@@ -340,7 +391,12 @@ class AlignedCoverGroup(CoverEntity):
         self.async_write_ha_state()
 
     @callback
-    def _cancel_motion(self) -> None:
+    def _abandon_plan(self) -> None:
+        """Stop following the current plan.
+
+        Cancels starts that haven't happened yet and forgets the position
+        estimates. Shades that are already moving keep moving.
+        """
         self._generation += 1
         for cancel in self._timers:
             cancel()
@@ -350,29 +406,51 @@ class AlignedCoverGroup(CoverEntity):
         self._direction = None
 
     async def _async_set_positions(self, trips: Iterable[Trip]) -> None:
-        await asyncio.gather(
+        """Send the trips' commands at once and log how long each took."""
+        trips = list(trips)
+        if not trips:
+            return
+        took_s = await asyncio.gather(
             *(
-                self.hass.services.async_call(
+                self._async_call(
                     COVER_DOMAIN,
                     SERVICE_SET_COVER_POSITION,
-                    {
-                        ATTR_ENTITY_ID: trip.shade.entity_id,
-                        ATTR_POSITION: trip.target_pct,
-                    },
-                    blocking=True,
-                    context=self._context,
+                    trip.shade.entity_id,
+                    {ATTR_POSITION: trip.target_pct},
                 )
                 for trip in trips
             )
         )
+        _LOGGER.debug(
+            "%s: set positions in %.3fs: %s",
+            self.entity_id,
+            max(took_s),
+            {
+                trip.shade.entity_id: f"{trip.target_pct}% in {seconds:.3f}s"
+                for trip, seconds in zip(trips, took_s, strict=True)
+            },
+        )
+
+    async def _async_press(self, button_entity_id: str) -> None:
+        took_s = await self._async_call(BUTTON_DOMAIN, SERVICE_PRESS, button_entity_id)
+        _LOGGER.debug(
+            "%s: pressed Pico %s in %.3fs", self.entity_id, button_entity_id, took_s
+        )
 
     async def _async_call(
-        self, domain: str, service: str, entity_id: str | list[str]
-    ) -> None:
+        self,
+        domain: str,
+        service: str,
+        entity_id: str | list[str],
+        data: dict[str, Any] | None = None,
+    ) -> float:
+        """Call a service and return how long it took, in seconds."""
+        started = time.monotonic()
         await self.hass.services.async_call(
             domain,
             service,
-            {ATTR_ENTITY_ID: entity_id},
+            {ATTR_ENTITY_ID: entity_id, **(data or {})},
             blocking=True,
             context=self._context,
         )
+        return time.monotonic() - started

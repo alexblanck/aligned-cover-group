@@ -255,7 +255,7 @@ class Room:
     def group(self):
         return self.hass.states.get(GROUP)
 
-    def positions_pct(self) -> dict[str, int]:
+    def positions_pct_by_id(self) -> dict[str, int]:
         return {eid: round(shade.position_pct) for eid, shade in self.shades.items()}
 
     def _record(self) -> None:
@@ -263,7 +263,7 @@ class Room:
             {eid: shade.position_pct for eid, shade in self.shades.items()}
         )
 
-    def misalignment(self, positions_pct: dict[str, float]) -> float:
+    def misalignment(self, positions_pct_by_id: dict[str, float]) -> float:
         """Smallest possible hemline spread, allowing shades to sit clamped.
 
         Independent of the integration's math: tries each shade's hemline as
@@ -273,7 +273,7 @@ class Room:
 
         def hemline_height(eid: str) -> float:
             spec = specs[eid]
-            return spec.closed_height + positions_pct[eid] / 100 * (
+            return spec.closed_height + positions_pct_by_id[eid] / 100 * (
                 spec.open_height - spec.closed_height
             )
 

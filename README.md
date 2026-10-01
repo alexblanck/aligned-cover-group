@@ -32,6 +32,16 @@ See [docs/DESIGN.md](docs/DESIGN.md) for details.
    enable its disabled button entities.
 3. Choose its Up, Stop and Down buttons when creating the group.
 
+## Attributes
+
+Besides the usual cover state and position, the group exposes:
+
+| Attribute | Meaning |
+|---|---|
+| `entity_id` | The shades in the group |
+| `aligned` | Whether every shade's hemline is level with the others (allowing for shades that are fully open or closed) |
+| `hemline_heights` | Each shade's current hemline height, in your configured unit |
+
 ## Troubleshooting
 
 Turn on debug logging to see each move the group plans: whether it used the

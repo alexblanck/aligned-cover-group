@@ -45,7 +45,7 @@ async def test_open_from_closed_stays_aligned(
     assert room.group.state == "opening"
     await room.run_until_still()
 
-    assert room.positions_pct() == {HIGH_SILL: 100, LOW_SILL: 100}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 100, LOW_SILL: 100}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
     # The high-sill shade waited until the other's hemline reached its sill.
     low_start = room[LOW_SILL].starts[0][0]
@@ -69,7 +69,7 @@ async def test_close_from_open_uses_pico_in_lockstep(
 
     assert room.pico["close"].presses == 1
     assert room[HIGH_SILL].starts[0][0] == room[LOW_SILL].starts[0][0]
-    assert room.positions_pct() == {HIGH_SILL: 0, LOW_SILL: 0}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
     assert room.group.state == "closed"
 
@@ -83,13 +83,14 @@ async def test_partial_close_then_reopen(
     await room.command("set_cover_position", position=50)
     await room.run_until_still()
     # Hemline 48: (48 - 24) / 60 and (48 - 12) / 72.
-    assert room.positions_pct() == {HIGH_SILL: 40, LOW_SILL: 50}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 40, LOW_SILL: 50}
     assert room.group.attributes["current_position"] == 50
     assert room.group.attributes["aligned"] is True
+    assert room.group.attributes["hemline_heights"] == {HIGH_SILL: 48, LOW_SILL: 48}
 
     await room.command("open_cover")
     await room.run_until_still()
-    assert room.positions_pct() == {HIGH_SILL: 100, LOW_SILL: 100}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 100, LOW_SILL: 100}
     assert room.pico["close"].presses == 1
     assert room.pico["open"].presses == 1
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
@@ -108,7 +109,7 @@ async def test_stop_during_staggered_open(
 
     assert room.pico["stop"].presses == 1
     assert not room[HIGH_SILL].starts, "pending start fired after stop"
-    assert room.positions_pct()[LOW_SILL] == pytest.approx(8, abs=1)
+    assert room.positions_pct_by_id()[LOW_SILL] == pytest.approx(8, abs=1)
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
     assert room.group.state not in ("opening", "closing")
     assert room.group.attributes["aligned"] is True
@@ -126,7 +127,7 @@ async def test_stop_while_aligned_and_moving(
     await room.run(20)
 
     # Both stopped by the same Pico press, 20 in down from the top.
-    assert room.positions_pct() == {HIGH_SILL: 67, LOW_SILL: 72}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 67, LOW_SILL: 72}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
     assert room.group.attributes["current_position"] == 72
 
@@ -140,7 +141,7 @@ async def test_stop_while_idle_does_not_trigger_favorite(
     await room.run(30)
 
     assert room.pico["stop"].presses == 0
-    assert room.positions_pct() == {HIGH_SILL: 100, LOW_SILL: 100}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 100, LOW_SILL: 100}
     assert all(shade.position_pct != FAVORITE for shade in room.shades.values())
 
 
@@ -155,7 +156,7 @@ async def test_reverse_while_opening(
     await room.command("close_cover")
     await room.run_until_still()
 
-    assert room.positions_pct() == {HIGH_SILL: 0, LOW_SILL: 0}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
@@ -170,7 +171,7 @@ async def test_retarget_while_moving(
     await room.command("set_cover_position", position=50)
     await room.run_until_still()
 
-    assert room.positions_pct() == {HIGH_SILL: 40, LOW_SILL: 50}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 40, LOW_SILL: 50}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
@@ -186,18 +187,18 @@ async def test_different_tops_and_sills(
 
     await room.command("set_cover_position", position=50)  # hemline 45
     await room.run_until_still()
-    assert room.positions_pct() == {"cover.left": 70, "cover.right": 42}
+    assert room.positions_pct_by_id() == {"cover.left": 70, "cover.right": 42}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
     await room.command("open_cover")
     await room.run_until_still()
-    assert room.positions_pct() == {"cover.left": 100, "cover.right": 100}
+    assert room.positions_pct_by_id() == {"cover.left": 100, "cover.right": 100}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
     assert room.group.attributes["current_position"] == 100
 
     await room.command("close_cover")
     await room.run_until_still()
-    assert room.positions_pct() == {"cover.left": 0, "cover.right": 0}
+    assert room.positions_pct_by_id() == {"cover.left": 0, "cover.right": 0}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
@@ -226,7 +227,7 @@ async def test_options_change_applies_to_running_group(
     await room.command("close_cover")
     await room.run_until_still()
     assert room.pico["close"].presses == 0
-    assert room.positions_pct() == {HIGH_SILL: 0, LOW_SILL: 0}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
@@ -249,8 +250,9 @@ async def test_unavailable_shade(
     assert f"leaving out shades with no position: {HIGH_SILL}" in caplog.text
     # Positions are unknown, so the Pico (which would move both) isn't used.
     assert room.pico["open"].presses == 0
-    assert room.positions_pct() == {HIGH_SILL: 0, LOW_SILL: 50}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 50}
     assert room.group.attributes["current_position"] == 50
+    assert room.group.attributes["hemline_heights"] == {LOW_SILL: 48}
 
     # It comes back where it was, now out of line with the other shade.
     room[HIGH_SILL].set_available(True)
@@ -259,7 +261,7 @@ async def test_unavailable_shade(
 
     await room.command("set_cover_position", position=50)
     await room.run_until_still()
-    assert room.positions_pct() == {HIGH_SILL: 40, LOW_SILL: 50}
+    assert room.positions_pct_by_id() == {HIGH_SILL: 40, LOW_SILL: 50}
     assert room.group.attributes["aligned"] is True
 
 
@@ -275,3 +277,63 @@ async def test_all_shades_unavailable(
     room[LOW_SILL].set_available(True)
     await hass.async_block_till_done()
     assert room.group.state == "closed"
+
+
+@both_reporting_modes
+async def test_shades_moving_opposite_ways(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, report_while_moving: bool
+) -> None:
+    # Out of line: hemlines at 54 and 48 (group at 54%).
+    room = await build_room(hass, freezer, same_tops(50), True, report_while_moving)
+    assert room.group.attributes["aligned"] is False
+    assert room.group.attributes["current_position"] == 54
+
+    # Hemline 52.3: the high-sill shade goes down, the low-sill shade goes up,
+    # and the group's own position goes up.
+    await room.command("set_cover_position", position=56)
+    assert room.group.state == "opening"
+    assert room.pico["open"].presses == room.pico["close"].presses == 0
+    await room.run_until_still()
+
+    assert room.positions_pct_by_id() == {HIGH_SILL: 47, LOW_SILL: 56}
+    assert room.group.attributes["aligned"] is True
+    assert room.group.attributes["current_position"] == 56
+
+
+@both_reporting_modes
+@pytest.mark.parametrize("pico", [True, False], ids=["pico", "no-pico"])
+@pytest.mark.parametrize(
+    ("service", "end_pct", "end_state"),
+    [("open_cover", 100, "open"), ("close_cover", 0, "closed")],
+    ids=["open", "close"],
+)
+@pytest.mark.parametrize(
+    "start_pcts",
+    [(0, 100, 50), (100, 0, 0), (30, 70, 10), (99, 1, 50)],
+    ids=lambda pcts: "-".join(map(str, pcts)),
+)
+async def test_open_and_close_from_shuffled_positions(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    start_pcts: tuple[int, int, int],
+    service: str,
+    end_pct: int,
+    end_state: str,
+    pico: bool,
+    report_while_moving: bool,
+) -> None:
+    # Three shades of different sizes and speeds, starting out of line.
+    specs = [
+        ShadeSpec("a", 24, 84, 30, start_pcts[0]),
+        ShadeSpec("b", 12, 84, 36, start_pcts[1]),
+        ShadeSpec("c", 30, 72, 15, start_pcts[2]),
+    ]
+    room = await build_room(hass, freezer, specs, pico, report_while_moving)
+
+    await room.command(service)
+    await room.run_until_still()
+
+    assert set(room.positions_pct_by_id().values()) == {end_pct}
+    assert room.group.state == end_state
+    assert room.group.attributes["current_position"] == end_pct
+    assert room.group.attributes["aligned"] is True
