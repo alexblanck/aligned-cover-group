@@ -7,6 +7,8 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .common import HIGH_SILL, LOW_SILL, SHADES, SPEED
 from .sim import FAVORITE, ShadeSpec, build_room
@@ -510,3 +512,15 @@ async def test_options_change_mid_move(
     # The reloaded group forgot the old plan, including its pending start.
     assert room[HIGH_SILL].starts == []
     assert room.group.state != "opening"
+
+
+async def test_group_has_its_own_service_device(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    room = await build_room(hass, freezer, same_tops(0))
+
+    entity = er.async_get(hass).async_get("cover.living_room")
+    device = dr.async_get(hass).async_get(entity.device_id)
+    assert device.name == "Living Room"
+    assert device.entry_type is dr.DeviceEntryType.SERVICE
+    assert device.config_entries == {room.entry.entry_id}

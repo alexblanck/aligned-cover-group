@@ -38,6 +38,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
@@ -54,6 +55,7 @@ from .const import (
     CONF_PICO_OPEN,
     CONF_PICO_STOP,
     CONF_TRAVEL_TIME_S,
+    DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -130,6 +132,8 @@ class AlignedCoverGroup(CoverEntity):
     """A cover group that keeps its shades' hemlines aligned."""
 
     _attr_should_poll = False
+    _attr_has_entity_name = True
+    _attr_name = None  # the group's device name is the entity's name
     _attr_device_class = CoverDeviceClass.SHADE
     # Derived from the shades' own recorded states; no need to store them too.
     _unrecorded_attributes = frozenset({ATTR_ENTITY_ID, ATTR_HEMLINE_HEIGHTS})
@@ -147,8 +151,13 @@ class AlignedCoverGroup(CoverEntity):
         pico: PicoButtons | None,
     ) -> None:
         """Initialize the group."""
-        self._attr_name = entry.title
         self._attr_unique_id = entry.entry_id
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
+            entry_type=DeviceEntryType.SERVICE,
+            model="Aligned cover group",
+        )
         self._group = group
         self._pico = pico
         self._entity_ids = [shade.entity_id for shade in group.shades]

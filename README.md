@@ -2,7 +2,7 @@
 
 # Aligned Cover Group
 
-A Home Assistant helper that groups side-by-side window shades of different
+A Home Assistant integration that groups side-by-side window shades of different
 sizes into one cover whose bottom edges (hemlines) stay level — at rest and
 while moving. Optionally drives a Lutron Caseta Pico so every shade starts and
 stops at exactly the same moment.
@@ -31,7 +31,8 @@ See [docs/DESIGN.md](docs/DESIGN.md) for details.
 
 1. HACS → ⋮ → Custom repositories → add this repository as an **Integration**.
 2. Install **Aligned Cover Group** and restart Home Assistant.
-3. Settings → Devices & services → Helpers → Create helper → **Aligned Cover Group**.
+3. Settings → Devices & services → Add integration → **Aligned Cover Group**.
+   Each group gets its own device, which you can assign to an area.
 
 ## Pico setup (optional)
 
