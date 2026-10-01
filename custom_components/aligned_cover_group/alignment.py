@@ -97,10 +97,13 @@ class Trip:
 class Plan:
     """How to move the group to a target hemline height.
 
-    `trips` has one entry per shade that moves, sorted by start delay. If
-    `pico` is set, press that Pico button first: it starts every paired shade
-    at once toward the endpoint, and only trips that stop short of it need a
-    command. `pico_blocker` says why an available Pico wasn't used.
+    `trips` has one entry per shade that moves, sorted by start delay, plus
+    "hold" trips (start equals target) for shades still heading to an earlier
+    target. If `pico` is set, press that Pico button first: it starts every
+    paired shade at once toward the endpoint, and only trips that stop short of
+    it need a command. Pico plans never need holds: a held shade partway would
+    have blocked the Pico, and one at the endpoint is carried there anyway.
+    `pico_blocker` says why an available Pico wasn't used.
     """
 
     pico: Direction | None
@@ -194,23 +197,28 @@ class AlignmentGroup:
         positions_pct_by_id: Mapping[str, int],
         target_pct: int,
         pico_available: bool,
+        moving_entity_ids: Collection[str] = (),
     ) -> Plan:
-        """Plan the trips that bring the group to `target_pct`."""
+        """Plan the trips that bring the group to `target_pct`.
+
+        `moving_entity_ids` are shades that may still be heading somewhere
+        else; any already at their new target get a trip that holds them there.
+        """
         target_height = self.hemline_height_for(target_pct)
-        trips = [
-            trip
-            for shade in self._shades_for(positions_pct_by_id.keys())
-            if (
-                trip := Trip(
-                    shade,
-                    positions_pct_by_id[shade.entity_id],
-                    shade.position_pct_for(target_height),
-                )
-            ).from_pct
-            != trip.target_pct
-        ]
+        trips: list[Trip] = []
+        holds: list[Trip] = []
+        for shade in self._shades_for(positions_pct_by_id.keys()):
+            trip = Trip(
+                shade,
+                positions_pct_by_id[shade.entity_id],
+                shade.position_pct_for(target_height),
+            )
+            if trip.from_pct != trip.target_pct:
+                trips.append(trip)
+            elif shade.entity_id in moving_entity_ids:
+                holds.append(trip)
         if not trips:
-            return Plan(pico=None, trips=())
+            return Plan(pico=None, trips=tuple(holds))
         directions = {trip.direction for trip in trips}
         direction = directions.pop() if len(directions) == 1 else None
 
@@ -233,7 +241,7 @@ class AlignmentGroup:
         staggered.sort(key=lambda trip: trip.delay_s)
         return Plan(
             pico=None,
-            trips=tuple(staggered),
+            trips=(*holds, *staggered),
             pico_blocker=blocker,
         )
 

@@ -6,9 +6,9 @@ from homeassistant.core import HomeAssistant
 
 HIGH_SILL = "cover.high_sill"
 LOW_SILL = "cover.low_sill"
-PICO_OPEN = "button.pico_on"
+PICO_OPEN = "button.pico_open"
 PICO_STOP = "button.pico_stop"
-PICO_CLOSE = "button.pico_off"
+PICO_CLOSE = "button.pico_close"
 
 FEATURES = (
     CoverEntityFeature.OPEN
@@ -17,20 +17,13 @@ FEATURES = (
     | CoverEntityFeature.SET_POSITION
 )
 
+# Same top, different sills, as entered in the setup flow.
 SHADES = [
-    {
-        "entity_id": HIGH_SILL,
-        "open_height": 84,
-        "closed_height": 24,
-        "travel_time_s": 30,
-    },
-    {
-        "entity_id": LOW_SILL,
-        "open_height": 84,
-        "closed_height": 12,
-        "travel_time_s": 36,
-    },
+    {"entity_id": HIGH_SILL, "open_height": 84, "closed_height": 24},
+    {"entity_id": LOW_SILL, "open_height": 84, "closed_height": 12},
 ]
+# Both shades move at this speed, in inches per second.
+SPEED = 2.0
 
 
 def set_shade(hass: HomeAssistant, entity_id: str, position_pct: int) -> None:

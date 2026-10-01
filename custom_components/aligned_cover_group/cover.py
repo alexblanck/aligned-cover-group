@@ -37,8 +37,12 @@ from homeassistant.core import (
     HomeAssistant,
     callback,
 )
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_track_point_in_utc_time,
+    async_track_state_change_event,
+)
 from homeassistant.util import dt as dt_util
 
 from .alignment import AlignmentGroup, Direction, Plan, Shade, Trip
@@ -56,25 +60,25 @@ _LOGGER = logging.getLogger(__name__)
 
 ATTR_HEMLINE_HEIGHTS = "hemline_heights"
 
-# Extra time after the planned motion before the group reports it has stopped.
+# How long past the planned end to wait for shades to report arriving before
+# giving up and treating the move as finished.
 MOTION_END_MARGIN_S = 2.0
 
 
 @dataclass(frozen=True)
 class _Travel:
-    """A shade's planned trip, used to estimate where it is mid-motion."""
+    """A trip being carried out, used to estimate where its shade is."""
 
+    trip: Trip
     start: datetime
-    from_pct: int
-    to_pct: int
-    travel_time_s: float
 
     def estimate_pct(self, now: datetime) -> int:
+        trip = self.trip
         elapsed_s = max(0.0, (now - self.start).total_seconds())
-        moved_pct = elapsed_s / self.travel_time_s * 100
-        if self.to_pct > self.from_pct:
-            return round(min(self.to_pct, self.from_pct + moved_pct))
-        return round(max(self.to_pct, self.from_pct - moved_pct))
+        moved_pct = elapsed_s / trip.shade.travel_time_s * 100
+        if trip.target_pct > trip.from_pct:
+            return round(min(trip.target_pct, trip.from_pct + moved_pct))
+        return round(max(trip.target_pct, trip.from_pct - moved_pct))
 
 
 @dataclass(frozen=True)
@@ -97,14 +101,20 @@ async def async_setup_entry(
 ) -> None:
     """Set up the aligned cover group entity."""
     options = entry.options
+    spans = [
+        shade[CONF_OPEN_HEIGHT] - shade[CONF_CLOSED_HEIGHT]
+        for shade in options[CONF_COVERS]
+    ]
+    # Every shade moves at the speed measured on the tallest one.
+    speed = max(spans) / options[CONF_TRAVEL_TIME_S]
     group = AlignmentGroup(
         Shade(
             entity_id=shade[CONF_ENTITY_ID],
             closed_height=shade[CONF_CLOSED_HEIGHT],
             open_height=shade[CONF_OPEN_HEIGHT],
-            travel_time_s=shade[CONF_TRAVEL_TIME_S],
+            travel_time_s=span / speed,
         )
-        for shade in options[CONF_COVERS]
+        for shade, span in zip(options[CONF_COVERS], spans, strict=True)
     )
     pico = None
     if options.get(CONF_PICO_OPEN):
@@ -143,13 +153,17 @@ class AlignedCoverGroup(CoverEntity):
         self._pico = pico
         self._entity_ids = [shade.entity_id for shade in group.shades]
         self._positions_pct_by_id: dict[str, int] = {}
-        # Set while a planned motion is (believed to be) in progress.
+        # Set while a planned motion is (believed to be) in progress. Tracked
+        # from our own plan: Caseta shades don't report opening/closing.
         self._moving = False
         self._direction: Direction | None = None
         self._timers: list[CALLBACK_TYPE] = []
-        # Planned trips of the current motion, keyed by entity id.
+        # Trips of the current motion, keyed by entity id, and the shades that
+        # have reported reaching their target.
         self._travel: dict[str, _Travel] = {}
-        # Bumped on every command so stale scheduled moves can tell they're stale.
+        self._arrived: set[str] = set()
+        # Bumped whenever a plan is abandoned, so a failing command can tell
+        # whether its plan is still the current one.
         self._generation = 0
 
     async def async_added_to_hass(self) -> None:
@@ -165,7 +179,23 @@ class AlignedCoverGroup(CoverEntity):
     @callback
     def _async_member_changed(self, event: Event[EventStateChangedData]) -> None:
         self._update_positions_pct_by_id()
+        if self._moving:
+            self._note_arrival(event.data["entity_id"])
         self.async_write_ha_state()
+
+    @callback
+    def _note_arrival(self, entity_id: str) -> None:
+        """Finish the motion once every shade has reported reaching its target."""
+        travel = self._travel.get(entity_id)
+        if (
+            travel is None
+            or dt_util.utcnow() < travel.start
+            or self._positions_pct_by_id.get(entity_id) != travel.trip.target_pct
+        ):
+            return
+        self._arrived.add(entity_id)
+        if self._arrived >= self._travel.keys():
+            self._finish_motion()
 
     @callback
     def _update_positions_pct_by_id(self) -> None:
@@ -193,7 +223,7 @@ class AlignedCoverGroup(CoverEntity):
 
     @property
     def is_closed(self) -> bool | None:
-        """Closed when every shade is closed."""
+        """Closed when every shade with a known position is closed."""
         if not self._positions_pct_by_id:
             return None
         return all(pct <= 0 for pct in self._positions_pct_by_id.values())
@@ -266,6 +296,7 @@ class AlignedCoverGroup(CoverEntity):
 
     async def _async_move_to(self, target_pct: int) -> None:
         positions_pct_by_id, positions_source = self._planning_positions_pct_by_id()
+        moving_entity_ids = set(self._travel) if self._moving else set()
         if missing := [e for e in self._entity_ids if e not in positions_pct_by_id]:
             _LOGGER.warning(
                 "%s: leaving out shades with no position: %s",
@@ -273,7 +304,12 @@ class AlignedCoverGroup(CoverEntity):
                 ", ".join(missing),
             )
         self._abandon_plan()
-        plan = self._group.plan(positions_pct_by_id, target_pct, self._pico is not None)
+        plan = self._group.plan(
+            positions_pct_by_id,
+            target_pct,
+            self._pico is not None,
+            moving_entity_ids,
+        )
         direction = self._group_direction(positions_pct_by_id, target_pct)
         _LOGGER.debug(
             "%s: to %s%% (hemline height %.1f) from %s positions %s -> "
@@ -326,68 +362,86 @@ class AlignedCoverGroup(CoverEntity):
         return Direction.OPENING if target_pct > current_pct else Direction.CLOSING
 
     async def _async_run(self, plan: Plan, direction: Direction | None) -> None:
-        generation = self._generation
         self._moving = True
         self._direction = direction
-        now = dt_util.utcnow()
+        started = dt_util.utcnow()
         self._travel = {
             trip.shade.entity_id: _Travel(
-                start=now + timedelta(seconds=trip.delay_s),
-                from_pct=trip.from_pct,
-                to_pct=trip.target_pct,
-                travel_time_s=trip.shade.travel_time_s,
+                trip, started + timedelta(seconds=trip.delay_s)
             )
             for trip in plan.trips
         }
-        self.async_write_ha_state()
-
-        if plan.pico is not None and self._pico:
-            await self._async_press(self._pico.toward(plan.pico))
-        commands = [trip for trip in plan.trips if trip.needs_command]
-        await self._async_set_positions(t for t in commands if t.delay_s <= 0)
-        # A stop or new move may have arrived while we awaited the commands.
-        if generation != self._generation:
-            _LOGGER.debug(
-                "%s: superseded while starting; not scheduling delayed starts",
-                self.entity_id,
-            )
-            return
-
-        for trip in commands:
-            if trip.delay_s > 0:
+        # Timers run at absolute times, so slow commands below don't delay them.
+        for travel in self._travel.values():
+            if travel.trip.needs_command and travel.trip.delay_s > 0:
                 self._timers.append(
-                    async_call_later(
+                    async_track_point_in_utc_time(
                         self.hass,
-                        trip.delay_s,
-                        partial(self._async_delayed_start, trip),
+                        partial(self._async_delayed_start, travel),
+                        travel.start,
                     )
                 )
         self._timers.append(
-            async_call_later(
+            async_track_point_in_utc_time(
                 self.hass,
-                plan.duration_s + MOTION_END_MARGIN_S,
-                self._async_motion_done,
+                self._async_motion_overdue,
+                started + timedelta(seconds=plan.duration_s + MOTION_END_MARGIN_S),
             )
         )
+        # A hold trip's shade may already be reporting its target.
+        for entity_id, travel in list(self._travel.items()):
+            if self._moving and travel.trip.from_pct == travel.trip.target_pct:
+                self._note_arrival(entity_id)
+        self.async_write_ha_state()
 
-    async def _async_delayed_start(self, trip: Trip, now: datetime) -> None:
-        scheduled = self._travel[trip.shade.entity_id].start
+        generation = self._generation
+        try:
+            if plan.pico is not None and self._pico:
+                await self._async_press(self._pico.toward(plan.pico))
+            await self._async_set_positions(
+                trip for trip in plan.trips if trip.needs_command and trip.delay_s <= 0
+            )
+        except HomeAssistantError:
+            if generation == self._generation:
+                self._abandon_plan()
+                self.async_write_ha_state()
+            raise
+
+    async def _async_delayed_start(self, travel: _Travel, now: datetime) -> None:
+        trip = travel.trip
         _LOGGER.debug(
             "%s: starting %s -> %s%% (timer %+.3fs from schedule)",
             self.entity_id,
             trip.shade.entity_id,
             trip.target_pct,
-            (now - scheduled).total_seconds(),
+            (now - travel.start).total_seconds(),
         )
-        await self._async_set_positions([trip])
+        try:
+            await self._async_set_positions([trip])
+        except HomeAssistantError as err:
+            _LOGGER.error(
+                "%s: couldn't start %s: %s", self.entity_id, trip.shade.entity_id, err
+            )
 
     @callback
-    def _async_motion_done(self, _now: datetime) -> None:
+    def _async_motion_overdue(self, _now: datetime) -> None:
+        if late := sorted(self._travel.keys() - self._arrived):
+            _LOGGER.warning(
+                "%s: shades didn't arrive by the planned end of the move: %s "
+                "(the configured travel time may be too short)",
+                self.entity_id,
+                ", ".join(
+                    f"{entity_id} at {self._positions_pct_by_id.get(entity_id)}%, "
+                    f"heading to {self._travel[entity_id].trip.target_pct}%"
+                    for entity_id in late
+                ),
+            )
+        self._finish_motion()
+
+    @callback
+    def _finish_motion(self) -> None:
         _LOGGER.debug("%s: motion finished", self.entity_id)
-        self._timers.clear()
-        self._travel.clear()
-        self._moving = False
-        self._direction = None
+        self._abandon_plan()
         self.async_write_ha_state()
 
     @callback
@@ -402,6 +456,7 @@ class AlignedCoverGroup(CoverEntity):
             cancel()
         self._timers.clear()
         self._travel.clear()
+        self._arrived.clear()
         self._moving = False
         self._direction = None
 

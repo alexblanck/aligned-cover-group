@@ -59,7 +59,9 @@ Most bugs are at the seams, so tests favor whole flows over individual methods.
   speed, and a Pico that behaves like a Caseta shade Pico, including the middle
   button going to the favorite position when nothing is moving. Everything goes
   through real Home Assistant services, and the group is created through its
-  config flow.
+  config flow. Commands pass through a simulated bridge (`room.bridge`) that
+  can add latency, hold commands until released, or fail, for testing timing
+  and races.
 - [tests/test_room.py](tests/test_room.py) drives the group like a user and
   checks hemline alignment after every tick, using math independent of the
   integration's. Scenarios run with shades that report position while moving
@@ -81,9 +83,9 @@ When adding or changing behavior:
   scenarios in both position-reporting modes unless only one applies.
 - Add a unit test only when the math is subtle and hard to reach end to end.
 
-Harness quirk: under frozen time, the test harness fires `async_call_later`
-timers up to 0.5 s early (production Home Assistant schedules them exactly).
-The alignment tolerance in `test_room.py` allows for this.
+The simulator fires timers with `async_fire_time_changed_exact`: the plain
+`async_fire_time_changed` bumps the time by up to 0.5 s (to suit HA's polling
+helpers), which would hide timing bugs.
 
 ## Code conventions
 

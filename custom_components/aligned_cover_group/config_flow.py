@@ -41,6 +41,11 @@ SHADE_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_OPEN_HEIGHT): _HEIGHT,
         vol.Required(CONF_CLOSED_HEIGHT): _HEIGHT,
+    }
+)
+
+TRAVEL_SCHEMA = vol.Schema(
+    {
         vol.Required(CONF_TRAVEL_TIME_S): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=1,
@@ -56,7 +61,9 @@ SHADE_SCHEMA = vol.Schema(
 
 def _group_schema(exclude: list[str]) -> vol.Schema:
     """Schema for choosing the covers and optional Pico buttons."""
-    button = selector.EntitySelector(selector.EntitySelectorConfig(domain="button"))
+    button = selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="button", integration="lutron_caseta")
+    )
     fields: dict[vol.Marker, Any] = {
         vol.Required(CONF_COVERS): selector.EntitySelector(
             selector.EntitySelectorConfig(
@@ -69,33 +76,54 @@ def _group_schema(exclude: list[str]) -> vol.Schema:
     return vol.Schema(fields)
 
 
+REQUIRED_FEATURES = CoverEntityFeature.SET_POSITION | CoverEntityFeature.STOP
+
+
 def _validate_group(hass: HomeAssistant, user_input: dict[str, Any]) -> str | None:
     """Return an error key for invalid group input, or None."""
     if len(user_input[CONF_COVERS]) < 2:
         return "too_few_covers"
     for entity_id in user_input[CONF_COVERS]:
-        state = hass.states.get(entity_id)
-        if state is None or state.state == STATE_UNAVAILABLE:
-            continue
-        features = state.attributes.get(ATTR_SUPPORTED_FEATURES, 0)
-        if not features & CoverEntityFeature.SET_POSITION:
-            return "cover_no_position"
+        features = _supported_features(hass, entity_id)
+        if features is not None and features & REQUIRED_FEATURES != REQUIRED_FEATURES:
+            return "cover_unsupported"
     pico = [user_input.get(key) for key in PICO_BUTTONS]
     if any(pico) and not all(pico):
         return "pico_incomplete"
+    if all(pico) and len(set(pico)) != len(pico):
+        return "pico_duplicate"
     return None
+
+
+def _supported_features(hass: HomeAssistant, entity_id: str) -> int | None:
+    """A cover's features, from its state or, if unavailable, the registry."""
+    state = hass.states.get(entity_id)
+    if state is not None and state.state != STATE_UNAVAILABLE:
+        return int(state.attributes.get(ATTR_SUPPORTED_FEATURES, 0))
+    if (entry := er.async_get(hass).async_get(entity_id)) is not None:
+        return entry.supported_features
+    return None
+
+
+def _ranges_overlap(shades: list[dict[str, Any]]) -> bool:
+    """Whether some hemline height is within every shade's range."""
+    highest_closed = max(shade[CONF_CLOSED_HEIGHT] for shade in shades)
+    lowest_open = min(shade[CONF_OPEN_HEIGHT] for shade in shades)
+    return bool(highest_closed < lowest_open)
 
 
 class _ShadeSteps(ConfigEntryBaseFlow):
     """Steps shared by the config and options flows.
 
     After the group step, one "shade" step runs per selected cover to collect
-    its heights and travel time.
+    its heights, then a "travel" step asks for the tallest shade's travel time
+    (all shades are assumed to move at the same speed).
     """
 
     _group: dict[str, Any]
     _shades: list[dict[str, Any]]
     _previous: dict[str, dict[str, Any]]
+    _previous_travel_time_s: float | None
 
     def _start_shades(self, group: dict[str, Any]) -> None:
         self._group = {key: value for key, value in group.items() if value}
@@ -104,7 +132,7 @@ class _ShadeSteps(ConfigEntryBaseFlow):
     async def async_step_shade(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Collect heights and travel time for one shade."""
+        """Collect heights for one shade."""
         entity_ids: list[str] = self._group[CONF_COVERS]
         entity_id = entity_ids[len(self._shades)]
         errors: dict[str, str] = {}
@@ -112,18 +140,14 @@ class _ShadeSteps(ConfigEntryBaseFlow):
         if user_input is not None:
             if user_input[CONF_CLOSED_HEIGHT] >= user_input[CONF_OPEN_HEIGHT]:
                 errors["base"] = "closed_not_below_open"
+            elif not _ranges_overlap([*self._shades, user_input]):
+                errors["base"] = "ranges_do_not_overlap"
             else:
                 self._shades.append({CONF_ENTITY_ID: entity_id, **user_input})
                 if len(self._shades) == len(entity_ids):
-                    return self._async_finish(
-                        {**self._group, CONF_COVERS: self._shades}
-                    )
+                    return await self.async_step_travel()
                 return await self.async_step_shade()
 
-        state = self.hass.states.get(entity_id)
-        name = (
-            state.attributes.get(ATTR_FRIENDLY_NAME, entity_id) if state else entity_id
-        )
         return self.async_show_form(
             step_id="shade",
             data_schema=self.add_suggested_values_to_schema(
@@ -131,10 +155,42 @@ class _ShadeSteps(ConfigEntryBaseFlow):
             ),
             errors=errors,
             description_placeholders={
-                "name": name,
+                "name": self._friendly_name(entity_id),
                 "index": str(len(self._shades) + 1),
                 "count": str(len(entity_ids)),
             },
+        )
+
+    async def async_step_travel(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect the tallest shade's travel time."""
+        if user_input is not None:
+            return self._async_finish(
+                {**self._group, CONF_COVERS: self._shades, **user_input}
+            )
+
+        tallest = max(
+            self._shades,
+            key=lambda shade: shade[CONF_OPEN_HEIGHT] - shade[CONF_CLOSED_HEIGHT],
+        )
+        suggested = {}
+        if self._previous_travel_time_s is not None:
+            suggested[CONF_TRAVEL_TIME_S] = self._previous_travel_time_s
+        return self.async_show_form(
+            step_id="travel",
+            data_schema=self.add_suggested_values_to_schema(TRAVEL_SCHEMA, suggested),
+            description_placeholders={
+                "name": self._friendly_name(tallest[CONF_ENTITY_ID])
+            },
+        )
+
+    def _friendly_name(self, entity_id: str) -> str:
+        state = self.hass.states.get(entity_id)
+        return (
+            str(state.attributes.get(ATTR_FRIENDLY_NAME, entity_id))
+            if state
+            else entity_id
         )
 
     @callback
@@ -150,6 +206,7 @@ class AlignedCoverGroupConfigFlow(_ShadeSteps, ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the flow."""
         self._previous = {}
+        self._previous_travel_time_s = None
 
     @staticmethod
     @callback
@@ -197,6 +254,7 @@ class AlignedCoverGroupOptionsFlow(_ShadeSteps, OptionsFlowWithReload):
         self._previous = {
             shade[CONF_ENTITY_ID]: shade for shade in options.get(CONF_COVERS, [])
         }
+        self._previous_travel_time_s = options.get(CONF_TRAVEL_TIME_S)
         errors: dict[str, str] = {}
         if user_input is not None:
             if error := _validate_group(self.hass, user_input):
@@ -211,7 +269,10 @@ class AlignedCoverGroupOptionsFlow(_ShadeSteps, OptionsFlowWithReload):
                 er.async_get(self.hass), self.config_entry.entry_id
             )
         ]
-        suggested = user_input or {**options, CONF_COVERS: list(self._previous)}
+        suggested = user_input or (
+            {key: options[key] for key in PICO_BUTTONS if key in options}
+            | {CONF_COVERS: list(self._previous)}
+        )
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(

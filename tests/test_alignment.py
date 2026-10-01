@@ -11,9 +11,15 @@ from custom_components.aligned_cover_group.alignment import (
     Trip,
 )
 
-# Same top, different sills, same speed (2 units/s).
-HIGH_SILL = Shade("cover.high_sill", closed_height=24, open_height=84, travel_time_s=30)
-LOW_SILL = Shade("cover.low_sill", closed_height=12, open_height=84, travel_time_s=36)
+from .common import SHADES, SPEED
+
+HIGH_SILL, LOW_SILL = (
+    Shade(
+        **config,
+        travel_time_s=(config["open_height"] - config["closed_height"]) / SPEED,
+    )
+    for config in SHADES
+)
 GROUP = AlignmentGroup([HIGH_SILL, LOW_SILL])
 
 

@@ -9,13 +9,19 @@ stops at exactly the same moment.
 
 - You tell it each shade's hemline height when fully open and fully closed,
   measured from a common reference (e.g. inches from the floor), plus how long
-  it takes to travel fully.
+  the tallest shade takes to travel fully.
+- All shades are assumed to move at the same speed (inches per second), as
+  shades from the same product line usually do. Shades that move at different
+  speeds still end up level, but drift apart while moving.
 - The group's 0–100% position is a shared hemline height. Each shade is sent
   to whatever position puts its hemline there (clamped to its own range).
 - When shades start from different heights, the lowest (or highest) one starts
   first and the others join as its hemline reaches theirs.
-- With a Pico configured, aligned moves start with a Pico press and stops are
-  always sent through the Pico, so the bridge moves every shade in lockstep.
+- With a Pico configured, moves that start from a level hemline begin with a
+  Pico press, and stops during a move go through the Pico, so the bridge
+  starts and stops every shade in lockstep. (A shade Pico's middle button
+  sends stationary shades to their favorite position, so it's only pressed
+  while the group is moving.)
 
 See [docs/DESIGN.md](docs/DESIGN.md) for details.
 

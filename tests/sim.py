@@ -8,6 +8,8 @@ moving shades but sends stationary shades to their favorite position.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -16,11 +18,12 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.button import ButtonEntity
 from homeassistant.components.cover import CoverEntity, CoverEntityFeature
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
-    async_fire_time_changed,
+    async_fire_time_changed_exact,
     setup_test_component_platform,
 )
 
@@ -32,6 +35,30 @@ STEP_S = 0.25  # simulated time per tick
 
 
 @dataclass
+class Bridge:
+    """How the simulated Lutron bridge delivers commands.
+
+    `latency_s` is how long each command takes to reach a shade (the clock
+    moves on meanwhile). `gate`, when set, holds position commands until the
+    test sets the event. `fail` makes every command raise, like an unreachable
+    bridge.
+    """
+
+    freezer: FrozenDateTimeFactory
+    latency_s: float = 0.0
+    gate: asyncio.Event | None = None
+    fail: bool = False
+
+    async def deliver(self, gated: bool = False) -> None:
+        if self.fail:
+            raise HomeAssistantError("Bridge unreachable")
+        if gated and self.gate is not None:
+            await self.gate.wait()
+        if self.latency_s:
+            self.freezer.tick(timedelta(seconds=self.latency_s))
+
+
+@dataclass
 class ShadeSpec:
     """A physical shade: geometry as configured, and its true speed."""
 
@@ -40,6 +67,20 @@ class ShadeSpec:
     open_height: float
     travel_time_s: float
     position_pct: float = 0
+
+    @classmethod
+    def from_config(
+        cls, config: dict[str, Any], speed: float, position_pct: float = 0
+    ) -> ShadeSpec:
+        """A shade matching a setup-flow config (as in `common.SHADES`)."""
+        span = config["open_height"] - config["closed_height"]
+        return cls(
+            config["entity_id"].removeprefix("cover."),
+            config["closed_height"],
+            config["open_height"],
+            span / speed,
+            position_pct,
+        )
 
     @property
     def entity_id(self) -> str:
@@ -57,8 +98,11 @@ class SimShade(CoverEntity):
         | CoverEntityFeature.SET_POSITION
     )
 
-    def __init__(self, spec: ShadeSpec, report_while_moving: bool) -> None:
+    def __init__(
+        self, spec: ShadeSpec, report_while_moving: bool, bridge: Bridge
+    ) -> None:
         self.spec = spec
+        self._bridge = bridge
         self.entity_id = spec.entity_id
         self._attr_name = spec.name
         self._attr_unique_id = spec.name
@@ -121,15 +165,19 @@ class SimShade(CoverEntity):
         self.async_write_ha_state()
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
+        await self._bridge.deliver(gated=True)
         self.go(kwargs["position"])
 
     async def async_open_cover(self, **kwargs: Any) -> None:
+        await self._bridge.deliver(gated=True)
         self.go(100)
 
     async def async_close_cover(self, **kwargs: Any) -> None:
+        await self._bridge.deliver(gated=True)
         self.go(0)
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
+        await self._bridge.deliver()
         self.stop()
 
 
@@ -138,8 +186,9 @@ class SimPicoButton(ButtonEntity):
 
     _attr_should_poll = False
 
-    def __init__(self, role: str, shades: list[SimShade]) -> None:
+    def __init__(self, role: str, shades: list[SimShade], bridge: Bridge) -> None:
         self.role = role
+        self._bridge = bridge
         self.entity_id = f"button.pico_{role}"
         self._attr_name = f"Pico {role}"
         self._attr_unique_id = f"pico_{role}"
@@ -147,6 +196,7 @@ class SimPicoButton(ButtonEntity):
         self.presses = 0
 
     async def async_press(self) -> None:
+        await self._bridge.deliver()
         self.presses += 1
         for shade in self._shades:
             shade.settle()
@@ -173,9 +223,13 @@ class Room:
         freezer: FrozenDateTimeFactory,
         shades: list[SimShade],
         pico: dict[str, SimPicoButton] | None,
+        bridge: Bridge,
+        configured_travel_time_s: float | None,
     ) -> None:
         self.hass = hass
         self.freezer = freezer
+        self.bridge = bridge
+        self._configured_travel_time_s = configured_travel_time_s
         self.shades = {shade.entity_id: shade for shade in shades}
         self.pico = pico
         self.entry: MockConfigEntry | None = None
@@ -201,19 +255,37 @@ class Room:
         flow = await self.hass.config_entries.flow.async_configure(
             flow["flow_id"], group_input
         )
+        flow = await self.answer_shade_steps(
+            flow, self.hass.config_entries.flow.async_configure
+        )
+        assert flow["type"] == "create_entry", flow
+        await self.hass.async_block_till_done()
+        self.entry = self.hass.config_entries.async_entries(DOMAIN)[0]
+
+    async def answer_shade_steps(
+        self, flow: Any, configure: Callable[..., Awaitable[Any]]
+    ) -> Any:
+        """Enter each shade's heights, then the tallest shade's travel time.
+
+        The travel time entered is the tallest shade's real one unless the
+        room was built with a different `configured_travel_time_s`.
+        """
         for shade in self.shades.values():
             assert flow["step_id"] == "shade", flow
-            flow = await self.hass.config_entries.flow.async_configure(
+            flow = await configure(
                 flow["flow_id"],
                 {
                     "open_height": shade.spec.open_height,
                     "closed_height": shade.spec.closed_height,
-                    "travel_time_s": shade.spec.travel_time_s,
                 },
             )
-        assert flow["type"] == "create_entry", flow
-        await self.hass.async_block_till_done()
-        self.entry = self.hass.config_entries.async_entries(DOMAIN)[0]
+        assert flow["step_id"] == "travel", flow
+        tallest = max(
+            self.shades.values(),
+            key=lambda shade: shade.spec.open_height - shade.spec.closed_height,
+        )
+        travel_time_s = self._configured_travel_time_s or tallest.spec.travel_time_s
+        return await configure(flow["flow_id"], {"travel_time_s": travel_time_s})
 
     async def command(self, service: str, **data: Any) -> None:
         """Call a cover service on the group."""
@@ -228,7 +300,7 @@ class Room:
         while elapsed_s < seconds:
             self.freezer.tick(timedelta(seconds=STEP_S))
             elapsed_s += STEP_S
-            async_fire_time_changed(self.hass)
+            async_fire_time_changed_exact(self.hass)
             await self.hass.async_block_till_done()
             for shade in self.shades.values():
                 shade.settle()
@@ -300,21 +372,24 @@ async def build_room(
     specs: list[ShadeSpec],
     pico: bool = True,
     report_while_moving: bool = True,
+    configured_travel_time_s: float | None = None,
 ) -> Room:
     """Set up simulated shades (and Pico), then the group via its config flow."""
-    shades = [SimShade(spec, report_while_moving) for spec in specs]
+    bridge = Bridge(freezer)
+    shades = [SimShade(spec, report_while_moving, bridge) for spec in specs]
     setup_test_component_platform(hass, "cover", shades)
     assert await async_setup_component(hass, "cover", {"cover": {"platform": "test"}})
     buttons = None
     if pico:
         buttons = {
-            role: SimPicoButton(role, shades) for role in ("open", "stop", "close")
+            role: SimPicoButton(role, shades, bridge)
+            for role in ("open", "stop", "close")
         }
         setup_test_component_platform(hass, "button", list(buttons.values()))
         assert await async_setup_component(
             hass, "button", {"button": {"platform": "test"}}
         )
     await hass.async_block_till_done()
-    room = Room(hass, freezer, shades, buttons)
+    room = Room(hass, freezer, shades, buttons, bridge, configured_travel_time_s)
     await room.add_group()
     return room

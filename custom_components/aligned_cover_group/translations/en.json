@@ -17,16 +17,24 @@
         "description": "Measure every shade's hemline (bottom edge) from the same reference point, such as inches from the floor.",
         "data": {
           "open_height": "Hemline height when fully open",
-          "closed_height": "Hemline height when fully closed",
-          "travel_time_s": "Full travel time (closed to open)"
+          "closed_height": "Hemline height when fully closed"
+        }
+      },
+      "travel": {
+        "title": "Travel time",
+        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.",
+        "data": {
+          "travel_time_s": "Full travel time"
         }
       }
     },
     "error": {
       "too_few_covers": "Choose at least two shades.",
-      "cover_no_position": "Every shade must support setting a position.",
       "pico_incomplete": "Choose all three Pico buttons, or none.",
-      "closed_not_below_open": "The closed height must be below the open height."
+      "closed_not_below_open": "The closed height must be below the open height.",
+      "cover_unsupported": "Every shade must support setting a position and stopping.",
+      "pico_duplicate": "Choose a different button for each Pico role.",
+      "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height."
     }
   },
   "options": {
@@ -46,16 +54,24 @@
         "description": "Measure every shade's hemline (bottom edge) from the same reference point, such as inches from the floor.",
         "data": {
           "open_height": "Hemline height when fully open",
-          "closed_height": "Hemline height when fully closed",
-          "travel_time_s": "Full travel time (closed to open)"
+          "closed_height": "Hemline height when fully closed"
+        }
+      },
+      "travel": {
+        "title": "Travel time",
+        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.",
+        "data": {
+          "travel_time_s": "Full travel time"
         }
       }
     },
     "error": {
       "too_few_covers": "Choose at least two shades.",
-      "cover_no_position": "Every shade must support setting a position.",
       "pico_incomplete": "Choose all three Pico buttons, or none.",
-      "closed_not_below_open": "The closed height must be below the open height."
+      "closed_not_below_open": "The closed height must be below the open height.",
+      "cover_unsupported": "Every shade must support setting a position and stopping.",
+      "pico_duplicate": "Choose a different button for each Pico role.",
+      "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height."
     }
   }
 }
