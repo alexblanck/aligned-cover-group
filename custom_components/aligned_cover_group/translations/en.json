@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Create an aligned cover group",
-        "description": "Choose the shades to keep level with each other.",
+        "description": "Group side-by-side shades so their bottom edges stay level.",
         "data": {
           "name": "Name",
           "covers": "Shades"
@@ -11,13 +11,22 @@
         "sections": {
           "pico": {
             "name": "Pico remote (optional)",
-            "description": "Only if a Lutron Pico is paired on the Caseta bridge to exactly these shades. Pressing its buttons makes the bridge start and stop every shade at the same instant, which keeps the hemlines level more precisely than sending each shade its own command. Choose its Up, Stop and Down buttons; they're disabled by default, so enable them on the Pico's device page first.",
+            "description": "Paired Picos can start and stop grouped shades at the exact same time, keeping the hemlines level more precisely than sending each shade its own command.\n\nTo use this, pair a Lutron Pico on the Caseta bridge with exactly these shades. Its buttons are disabled in Home Assistant by default, so enable them on the Pico's device page first.",
             "data": {
-              "pico_open": "Up (open) button",
-              "pico_stop": "Stop (middle) button",
-              "pico_close": "Down (close) button"
+              "pico_open": "Up button",
+              "pico_stop": "Middle button",
+              "pico_close": "Down button"
+            },
+            "data_description": {
+              "pico_open": "Named “On” in Home Assistant. Not “Raise”, which is a small arrow button.",
+              "pico_stop": "Named “Stop” in Home Assistant.",
+              "pico_close": "Named “Off” in Home Assistant. Not “Lower”, which is a small arrow button."
             }
           }
+        },
+        "data_description": {
+          "name": "For example, “Living Room Aligned”.",
+          "covers": "The side-by-side shades to keep level. Each must support setting a position and stopping."
         }
       },
       "shade": {
@@ -49,20 +58,28 @@
     "step": {
       "init": {
         "title": "Edit aligned cover group",
-        "description": "Choose the shades to keep level with each other.",
+        "description": "Group side-by-side shades so their bottom edges stay level.",
         "data": {
           "covers": "Shades"
         },
         "sections": {
           "pico": {
             "name": "Pico remote (optional)",
-            "description": "Only if a Lutron Pico is paired on the Caseta bridge to exactly these shades. Pressing its buttons makes the bridge start and stop every shade at the same instant, which keeps the hemlines level more precisely than sending each shade its own command. Choose its Up, Stop and Down buttons; they're disabled by default, so enable them on the Pico's device page first.",
+            "description": "Paired Picos can start and stop grouped shades at the exact same time, keeping the hemlines level more precisely than sending each shade its own command.\n\nTo use this, pair a Lutron Pico on the Caseta bridge with exactly these shades. Its buttons are disabled in Home Assistant by default, so enable them on the Pico's device page first.",
             "data": {
-              "pico_open": "Up (open) button",
-              "pico_stop": "Stop (middle) button",
-              "pico_close": "Down (close) button"
+              "pico_open": "Up button",
+              "pico_stop": "Middle button",
+              "pico_close": "Down button"
+            },
+            "data_description": {
+              "pico_open": "Named “On” in Home Assistant. Not “Raise”, which is a small arrow button.",
+              "pico_stop": "Named “Stop” in Home Assistant.",
+              "pico_close": "Named “Off” in Home Assistant. Not “Lower”, which is a small arrow button."
             }
           }
+        },
+        "data_description": {
+          "covers": "The side-by-side shades to keep level. Each must support setting a position and stopping."
         }
       },
       "shade": {
