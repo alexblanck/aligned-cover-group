@@ -8,6 +8,7 @@ import voluptuous as vol
 from homeassistant.components.cover import CoverEntityFeature
 from homeassistant.config_entries import (
     ConfigEntry,
+    ConfigEntryBaseFlow,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlowWithReload,
@@ -27,7 +28,7 @@ from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
     CONF_OPEN_HEIGHT,
-    CONF_TRAVEL_TIME,
+    CONF_TRAVEL_TIME_S,
     DOMAIN,
     PICO_BUTTONS,
 )
@@ -40,7 +41,7 @@ SHADE_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_OPEN_HEIGHT): _HEIGHT,
         vol.Required(CONF_CLOSED_HEIGHT): _HEIGHT,
-        vol.Required(CONF_TRAVEL_TIME): selector.NumberSelector(
+        vol.Required(CONF_TRAVEL_TIME_S): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=1,
                 max=300,
@@ -56,16 +57,16 @@ SHADE_SCHEMA = vol.Schema(
 def _group_schema(exclude: list[str]) -> vol.Schema:
     """Schema for choosing the covers and optional Pico buttons."""
     button = selector.EntitySelector(selector.EntitySelectorConfig(domain="button"))
-    return vol.Schema(
-        {
-            vol.Required(CONF_COVERS): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="cover", multiple=True, exclude_entities=exclude
-                )
-            ),
-            **{vol.Optional(key): button for key in PICO_BUTTONS},
-        }
-    )
+    fields: dict[vol.Marker, Any] = {
+        vol.Required(CONF_COVERS): selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain="cover", multiple=True, exclude_entities=exclude
+            )
+        ),
+    }
+    for key in PICO_BUTTONS:
+        fields[vol.Optional(key)] = button
+    return vol.Schema(fields)
 
 
 def _validate_group(hass: HomeAssistant, user_input: dict[str, Any]) -> str | None:
@@ -85,14 +86,13 @@ def _validate_group(hass: HomeAssistant, user_input: dict[str, Any]) -> str | No
     return None
 
 
-class _ShadeSteps:
+class _ShadeSteps(ConfigEntryBaseFlow):
     """Steps shared by the config and options flows.
 
     After the group step, one "shade" step runs per selected cover to collect
     its heights and travel time.
     """
 
-    hass: HomeAssistant
     _group: dict[str, Any]
     _shades: list[dict[str, Any]]
     _previous: dict[str, dict[str, Any]]
@@ -124,9 +124,9 @@ class _ShadeSteps:
         name = (
             state.attributes.get(ATTR_FRIENDLY_NAME, entity_id) if state else entity_id
         )
-        return self.async_show_form(  # type: ignore[attr-defined]
+        return self.async_show_form(
             step_id="shade",
-            data_schema=self.add_suggested_values_to_schema(  # type: ignore[attr-defined]
+            data_schema=self.add_suggested_values_to_schema(
                 SHADE_SCHEMA, user_input or self._previous.get(entity_id, {})
             ),
             errors=errors,

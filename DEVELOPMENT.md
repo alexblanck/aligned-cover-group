@@ -1,0 +1,125 @@
+# Development
+
+How to work on Aligned Cover Group. For how alignment and motion work, see
+[docs/DESIGN.md](docs/DESIGN.md).
+
+## Project layout
+
+| Path | What's there |
+|---|---|
+| `custom_components/aligned_cover_group/alignment.py` | Pure math: hemline heights, alignment, motion plans. No Home Assistant imports |
+| `custom_components/aligned_cover_group/cover.py` | The group entity: runs plans as service calls and timers, estimates positions mid-move |
+| `custom_components/aligned_cover_group/config_flow.py` | Create/edit screens (config and options flows) |
+| `custom_components/aligned_cover_group/translations/en.json` | UI text for those screens |
+| `tests/sim.py` | Simulated shades and Pico used by the scenario tests |
+| `tests/test_room.py` | End-to-end scenarios (most tests live here) |
+| `docs/DESIGN.md` | Design notes and decisions |
+
+## Setup
+
+Requires Python 3.14+ (the minimum for current Home Assistant).
+
+```bash
+python3.14 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements_test.txt ruff mypy
+```
+
+No Python 3.14 installed? [uv](https://docs.astral.sh/uv/) can fetch one:
+`uv venv --python 3.14 .venv`, then `uv pip install -r requirements_test.txt ruff mypy`.
+
+`requirements_test.txt` pulls in `pytest-homeassistant-custom-component`, which
+installs Home Assistant itself. mypy needs that installed in the same venv to
+see Home Assistant's type hints. Ruff and mypy are deliberately not in the
+requirements yet.
+
+## Checks
+
+Run all three before considering a change done:
+
+```bash
+pytest
+ruff check custom_components tests && ruff format custom_components tests
+mypy --strict custom_components/aligned_cover_group
+```
+
+Handy pytest variations:
+
+```bash
+pytest tests/test_room.py -k reverse                      # one scenario by name
+pytest -k reverse -o log_cli=true --log-cli-level=DEBUG   # with the integration's debug logs
+```
+
+## Testing approach
+
+Most bugs are at the seams, so tests favor whole flows over individual methods.
+
+- [tests/sim.py](tests/sim.py) simulates a room: shades are real cover
+  entities that move over (frozen, manually advanced) time at their travel
+  speed, and a Pico that behaves like a Caseta shade Pico, including the middle
+  button going to the favorite position when nothing is moving. Everything goes
+  through real Home Assistant services, and the group is created through its
+  config flow.
+- [tests/test_room.py](tests/test_room.py) drives the group like a user and
+  checks hemline alignment after every tick, using math independent of the
+  integration's. Scenarios run with shades that report position while moving
+  and shades that only report when stopped.
+- [tests/test_alignment.py](tests/test_alignment.py) keeps only edge cases of
+  the math that are awkward to reach end to end;
+  [tests/test_config_flow.py](tests/test_config_flow.py) covers validation
+  errors.
+
+When adding or changing behavior:
+
+- Write a scenario in `test_room.py` first: set up the room, command the group
+  through its services the way a user or automation would, advance time, and
+  assert on what physically happened (shade positions, hemline alignment over
+  the whole run, Pico presses, group state). Avoid asserting on internal
+  method calls.
+- If the real hardware does something the simulator doesn't model, extend
+  `sim.py` to model it rather than working around it in a test. Run new
+  scenarios in both position-reporting modes unless only one applies.
+- Add a unit test only when the math is subtle and hard to reach end to end.
+
+Harness quirk: under frozen time, the test harness fires `async_call_later`
+timers up to 0.5 s early (production Home Assistant schedules them exactly).
+The alignment tolerance in `test_room.py` allows for this.
+
+## Code conventions
+
+- Keep `alignment.py` free of Home Assistant imports; the entity in `cover.py`
+  turns its plans into service calls.
+- `*_pct` names hold positions in whole percents (0 closed, 100 open, `int`
+  like Home Assistant's `current_position`). `*_height` names hold hemline
+  heights in the user's unit.
+- Home Assistant's `async_` prefix means a coroutine or a `@callback`
+  function, never a plain undecorated function.
+- Debug logs should name the group (`self.entity_id`) so multiple groups can be
+  told apart.
+
+Adding a setting touches several files: a key in `const.py`, the schema and
+validation in `config_flow.py` (both the create and edit flows), its label in
+`translations/en.json`, and reading it in `cover.py`. Settings are stored in
+the config entry's `options`.
+
+## Trying it on real hardware
+
+Either:
+
+- **HACS:** develop on `main`; in HACS, Redownload the integration, pick
+  `main`, and restart Home Assistant after each push.
+- **Manual:** copy `custom_components/aligned_cover_group` into your Home
+  Assistant config's `custom_components/` folder and restart.
+
+Turn on debug logging (see the README) to see each planned move: the positions
+it planned from, whether it used the Pico (and why not), and every shade
+command with its delay.
+
+## Releasing
+
+1. Bump `version` in `custom_components/aligned_cover_group/manifest.json`.
+2. Commit, tag `vX.Y.Z`, and push the tag.
+3. Publish a GitHub release for the tag; HACS offers releases as versions.
+
+`hacs.json` sets the minimum Home Assistant version; raise it if the code
+starts depending on newer Home Assistant APIs.

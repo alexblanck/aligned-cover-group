@@ -18,15 +18,25 @@ FEATURES = (
 )
 
 SHADES = [
-    {"entity_id": HIGH_SILL, "open_height": 84, "closed_height": 24, "travel_time": 30},
-    {"entity_id": LOW_SILL, "open_height": 84, "closed_height": 12, "travel_time": 36},
+    {
+        "entity_id": HIGH_SILL,
+        "open_height": 84,
+        "closed_height": 24,
+        "travel_time_s": 30,
+    },
+    {
+        "entity_id": LOW_SILL,
+        "open_height": 84,
+        "closed_height": 12,
+        "travel_time_s": 36,
+    },
 ]
 
 
-def set_shade(hass: HomeAssistant, entity_id: str, position: int) -> None:
+def set_shade(hass: HomeAssistant, entity_id: str, position_pct: int) -> None:
     """Set a fake shade's state."""
     hass.states.async_set(
         entity_id,
-        "closed" if position == 0 else "open",
-        {"current_position": position, ATTR_SUPPORTED_FEATURES: FEATURES},
+        "closed" if position_pct == 0 else "open",
+        {"current_position": position_pct, ATTR_SUPPORTED_FEATURES: FEATURES},
     )

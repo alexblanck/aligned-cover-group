@@ -47,16 +47,19 @@ up/down times can be added if other hardware needs them.
 - Group range: lowest `closed_height` (0%) to highest `open_height` (100%).
 - Group position → hemline `H` → each shade's position:
   `clamp((H - closed) / (open - closed) * 100, 0, 100)`.
-- Reported position: if the shades are *aligned* (one hemline `H` is consistent
-  with every shade, treating a fully closed/open shade as consistent with any
-  `H` beyond its end), report that `H`. Otherwise report the average hemline.
-  This degrades to the average (like HA's cover group) while keeping the slider
+- Aligned: there's a group hemline height `H` that would put every shade where
+  it is (each shade's hemline within 1% of the group's range of `H` clamped to
+  that shade's range). `H` is the average hemline of the shades that are
+  partway, or the group's closed/open height when every shade is fully
+  closed/open.
+- Reported position: `H` when aligned, otherwise the average hemline. This
+  degrades to the average (like HA's cover group) while keeping the slider
   stable after the group itself moved the shades.
 
 ## Motion
 
 Commands are open-loop: Caseta shades don't reliably report position while
-moving, so timing comes from `travel_time`. While the group's own motion is
+moving, so timing comes from `travel_time_s`. While the group's own motion is
 running, a new command plans from *estimated* positions (start position, start
 time, speed) rather than the last reported ones, so reversing or retargeting
 mid-move works even if shades only report when they stop.

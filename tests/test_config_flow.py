@@ -47,7 +47,7 @@ async def test_shade_heights_validated(hass: HomeAssistant) -> None:
         result["flow_id"], {"name": "x", "covers": [HIGH_SILL, LOW_SILL]}
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"open_height": 10, "closed_height": 20, "travel_time": 30}
+        result["flow_id"], {"open_height": 10, "closed_height": 20, "travel_time_s": 30}
     )
     assert result["errors"] == {"base": "closed_not_below_open"}
     assert result["description_placeholders"]["index"] == "1"

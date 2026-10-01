@@ -45,18 +45,7 @@ logger:
 
 ## Development
 
-```bash
-pip install -r requirements_test.txt
-pytest
-```
-
-Requires Python 3.14+.
-
-Most tests are end-to-end scenarios ([tests/test_room.py](tests/test_room.py)):
-a simulated room of shades that move over time and a Pico that behaves like a
-Caseta shade Pico ([tests/sim.py](tests/sim.py)), driven through real Home
-Assistant services. They check that hemlines stay level throughout every move,
-not just at the end.
+See [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Credits
 

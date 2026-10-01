@@ -28,7 +28,7 @@ from custom_components.aligned_cover_group.const import DOMAIN
 
 GROUP = "cover.living_room"
 FAVORITE = 50
-STEP = 0.25  # seconds of simulated time per tick
+STEP_S = 0.25  # simulated time per tick
 
 
 @dataclass
@@ -38,8 +38,8 @@ class ShadeSpec:
     name: str
     closed_height: float
     open_height: float
-    travel_time: float
-    position: float = 0
+    travel_time_s: float
+    position_pct: float = 0
 
     @property
     def entity_id(self) -> str:
@@ -62,21 +62,22 @@ class SimShade(CoverEntity):
         self.entity_id = spec.entity_id
         self._attr_name = spec.name
         self._attr_unique_id = spec.name
-        self.position = float(spec.position)
-        self.target = self.position
+        # The motor's true position: fractional, unlike what HA reports.
+        self.position_pct = float(spec.position_pct)
+        self.target_pct = self.position_pct
         self._report_while_moving = report_while_moving
-        self._reported = round(self.position)
+        self._reported = round(self.position_pct)
         self._last = dt_util.utcnow()
-        # (time, event) log of motion starts, for synchronization checks.
+        # (time, target_pct) log of motion starts, for synchronization checks.
         self.starts: list[tuple[float, float]] = []
 
     @property
     def moving(self) -> bool:
-        return self.position != self.target
+        return self.position_pct != self.target_pct
 
     @property
-    def hemline(self) -> float:
-        return self.spec.closed_height + self.position / 100 * (
+    def hemline_height(self) -> float:
+        return self.spec.closed_height + self.position_pct / 100 * (
             self.spec.open_height - self.spec.closed_height
         )
 
@@ -91,27 +92,32 @@ class SimShade(CoverEntity):
     def settle(self) -> None:
         """Advance the motor to the current time."""
         now = dt_util.utcnow()
-        elapsed = (now - self._last).total_seconds()
+        elapsed_s = (now - self._last).total_seconds()
         self._last = now
-        step = elapsed * 100 / self.spec.travel_time
-        if self.target > self.position:
-            self.position = min(self.target, self.position + step)
-        elif self.target < self.position:
-            self.position = max(self.target, self.position - step)
+        step_pct = elapsed_s * 100 / self.spec.travel_time_s
+        if self.target_pct > self.position_pct:
+            self.position_pct = min(self.target_pct, self.position_pct + step_pct)
+        elif self.target_pct < self.position_pct:
+            self.position_pct = max(self.target_pct, self.position_pct - step_pct)
         if self._report_while_moving or not self.moving:
-            self._reported = round(self.position)
+            self._reported = round(self.position_pct)
 
-    def go(self, target: float) -> None:
+    def go(self, target_pct: float) -> None:
         self.settle()
-        if not self.moving and target != self.position:
-            self.starts.append((dt_util.utcnow().timestamp(), target))
-        self.target = target
+        if not self.moving and target_pct != self.position_pct:
+            self.starts.append((dt_util.utcnow().timestamp(), target_pct))
+        self.target_pct = target_pct
         self.async_write_ha_state()
 
     def stop(self) -> None:
         self.settle()
-        self.target = self.position
-        self._reported = round(self.position)
+        self.target_pct = self.position_pct
+        self._reported = round(self.position_pct)
+        self.async_write_ha_state()
+
+    def set_available(self, available: bool) -> None:
+        """Drop off or come back, like a shade losing contact with the bridge."""
+        self._attr_available = available
         self.async_write_ha_state()
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
@@ -202,7 +208,7 @@ class Room:
                 {
                     "open_height": shade.spec.open_height,
                     "closed_height": shade.spec.closed_height,
-                    "travel_time": shade.spec.travel_time,
+                    "travel_time_s": shade.spec.travel_time_s,
                 },
             )
         assert flow["type"] == "create_entry", flow
@@ -218,10 +224,10 @@ class Room:
 
     async def run(self, seconds: float) -> None:
         """Advance simulated time, letting timers fire and motors move."""
-        elapsed = 0.0
-        while elapsed < seconds:
-            self.freezer.tick(timedelta(seconds=STEP))
-            elapsed += STEP
+        elapsed_s = 0.0
+        while elapsed_s < seconds:
+            self.freezer.tick(timedelta(seconds=STEP_S))
+            elapsed_s += STEP_S
             async_fire_time_changed(self.hass)
             await self.hass.async_block_till_done()
             for shade in self.shades.values():
@@ -230,12 +236,12 @@ class Room:
             await self.hass.async_block_till_done()
             self._record()
 
-    async def run_until_still(self, limit: float = 300) -> None:
+    async def run_until_still(self, limit_s: float = 300) -> None:
         """Run until no shade is moving and the group isn't either."""
-        elapsed = 0.0
-        while elapsed < limit:
-            await self.run(STEP)
-            elapsed += STEP
+        elapsed_s = 0.0
+        while elapsed_s < limit_s:
+            await self.run(STEP_S)
+            elapsed_s += STEP_S
             if not any(
                 s.moving for s in self.shades.values()
             ) and self.group.state not in (
@@ -249,13 +255,15 @@ class Room:
     def group(self):
         return self.hass.states.get(GROUP)
 
-    def positions(self) -> dict[str, int]:
-        return {eid: round(shade.position) for eid, shade in self.shades.items()}
+    def positions_pct(self) -> dict[str, int]:
+        return {eid: round(shade.position_pct) for eid, shade in self.shades.items()}
 
     def _record(self) -> None:
-        self.history.append({eid: shade.position for eid, shade in self.shades.items()})
+        self.history.append(
+            {eid: shade.position_pct for eid, shade in self.shades.items()}
+        )
 
-    def misalignment(self, positions: dict[str, float]) -> float:
+    def misalignment(self, positions_pct: dict[str, float]) -> float:
         """Smallest possible hemline spread, allowing shades to sit clamped.
 
         Independent of the integration's math: tries each shade's hemline as
@@ -263,18 +271,18 @@ class Room:
         """
         specs = {eid: shade.spec for eid, shade in self.shades.items()}
 
-        def hemline(eid: str) -> float:
+        def hemline_height(eid: str) -> float:
             spec = specs[eid]
-            return spec.closed_height + positions[eid] / 100 * (
+            return spec.closed_height + positions_pct[eid] / 100 * (
                 spec.open_height - spec.closed_height
             )
 
         best = float("inf")
-        for candidate in (hemline(eid) for eid in specs):
+        for candidate in (hemline_height(eid) for eid in specs):
             worst = max(
                 abs(
                     min(max(candidate, spec.closed_height), spec.open_height)
-                    - hemline(eid)
+                    - hemline_height(eid)
                 )
                 for eid, spec in specs.items()
             )

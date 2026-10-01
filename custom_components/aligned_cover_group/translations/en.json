@@ -18,7 +18,7 @@
         "data": {
           "open_height": "Hemline height when fully open",
           "closed_height": "Hemline height when fully closed",
-          "travel_time": "Full travel time (closed to open)"
+          "travel_time_s": "Full travel time (closed to open)"
         }
       }
     },
@@ -47,7 +47,7 @@
         "data": {
           "open_height": "Hemline height when fully open",
           "closed_height": "Hemline height when fully closed",
-          "travel_time": "Full travel time (closed to open)"
+          "travel_time_s": "Full travel time (closed to open)"
         }
       }
     },
