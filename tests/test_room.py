@@ -9,9 +9,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
+from pytest_homeassistant_custom_component.components.diagnostics import (
+    get_diagnostics_for_config_entry,
+    get_diagnostics_for_device,
+)
+from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from .common import HIGH_SILL, LOW_SILL, SHADES, SPEED
-from .sim import FAVORITE, ShadeSpec, build_room
+from .sim import FAVORITE, GROUP, ShadeSpec, build_room
 
 # Hemline spread allowed while moving, in inches: timers fire on the next
 # 0.25 s tick (0.5 in at 2 in/s), plus whole-percent position rounding.
@@ -517,3 +523,36 @@ async def test_physical_pico_stop_takes_over(
 
     assert room.group.state not in ("opening", "closing")
     assert room.positions_pct_by_id() == {HIGH_SILL: 67, LOW_SILL: 72}
+
+
+async def test_diagnostics_mid_move(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    hass_client: ClientSessionGenerator,
+) -> None:
+    assert await async_setup_component(hass, "diagnostics", {})
+    room = await build_room(hass, freezer, same_tops(0))
+
+    await room.command("open_cover")
+    await room.run(3)  # low-sill shade moving; high-sill shade not started yet
+    diagnostics = await get_diagnostics_for_config_entry(hass, hass_client, room.entry)
+
+    assert diagnostics["title"] == "Living Room"
+    assert diagnostics["options"]["travel_time_s"] == 36
+    group = diagnostics["group"]
+    assert group["state"] == "opening"
+    assert group["moving"] is True
+    shades = {shade["entity_id"]: shade for shade in group["shades"]}
+    assert shades[LOW_SILL]["speed"] == 2
+    assert shades[HIGH_SILL]["hemline_height"] == 24
+    trips = {trip["entity_id"]: trip for trip in group["trips"]}
+    assert trips[LOW_SILL]["estimated_pct"] == 8  # 6 in of 72 after 3 s
+    assert trips[HIGH_SILL]["delay_s"] == 6
+    assert trips[HIGH_SILL]["estimated_pct"] == 0
+
+    # The device page offers the same download.
+    device_id = er.async_get(hass).async_get(GROUP).device_id
+    device = dr.async_get(hass).async_get(device_id)
+    assert await get_diagnostics_for_device(hass, hass_client, room.entry, device) == (
+        await get_diagnostics_for_config_entry(hass, hass_client, room.entry)
+    )

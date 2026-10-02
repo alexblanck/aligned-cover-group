@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
@@ -131,7 +131,9 @@ async def async_setup_entry(
             stop=options[CONF_PICO_STOP],
             close=options[CONF_PICO_CLOSE],
         )
-    async_add_entities([AlignedCoverGroup(entry, group, pico)])
+    entity = AlignedCoverGroup(entry, group, pico)
+    entry.runtime_data = entity  # for diagnostics
+    async_add_entities([entity])
 
 
 class AlignedCoverGroup(CoverEntity):
@@ -259,6 +261,50 @@ class AlignedCoverGroup(CoverEntity):
     def is_closing(self) -> bool:
         """Whether a planned motion is closing the group."""
         return self._moving and self._direction is Direction.CLOSING
+
+    @callback
+    def diagnostics(self) -> dict[str, Any]:
+        """Settings as the group uses them, the shades' state, and any move."""
+        now = dt_util.utcnow()
+        return {
+            "entity_id": self.entity_id,
+            "state": self.state,
+            "current_position": self.current_cover_position,
+            "aligned": self.extra_state_attributes["aligned"],
+            "pico": asdict(self._pico) if self._pico else None,
+            "shades": [
+                {
+                    "entity_id": shade.entity_id,
+                    "closed_height": shade.closed_height,
+                    "open_height": shade.open_height,
+                    "travel_time_s": shade.travel_time_s,
+                    "speed": shade.speed,
+                    "reported_position_pct": (
+                        position_pct := self._positions_pct_by_id.get(shade.entity_id)
+                    ),
+                    "hemline_height": (
+                        None
+                        if position_pct is None
+                        else shade.hemline_height(position_pct)
+                    ),
+                }
+                for shade in self._group.shades
+            ],
+            "moving": self._moving,
+            "direction": self._direction,
+            "trips": [
+                {
+                    "entity_id": entity_id,
+                    "from_pct": travel.trip.from_pct,
+                    "target_pct": travel.trip.target_pct,
+                    "delay_s": travel.trip.delay_s,
+                    "needs_command": travel.trip.needs_command,
+                    "start": travel.start.isoformat(),
+                    "estimated_pct": travel.estimate_pct(now),
+                }
+                for entity_id, travel in self._travel.items()
+            ],
+        }
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

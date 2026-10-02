@@ -55,8 +55,15 @@ Besides the usual cover state and position, the group exposes:
 
 ## Troubleshooting
 
+**Download diagnostics** (in the ⋮ menu on the integration's page, or on a
+group's device page) saves a JSON file with the group's settings, the heights
+and speeds it derived from them, each shade's position and hemline height, and
+any move in progress. Attach it when reporting a problem.
+
 Turn on debug logging to see each move the group plans: whether it used the
-Pico (and why not), every shade command with its delay, and stops.
+Pico (and why not), every shade command with its delay, and stops. Use **Enable
+debug logging** on the integration's page, or for logging that survives
+restarts:
 
 ```yaml
 logger:
