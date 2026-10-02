@@ -294,6 +294,7 @@ class AlignedCoverGroupOptionsFlow(_ShadeSteps, OptionsFlowWithReload):
                 _group_schema(own_entities, pico_collapsed=not pico), suggested
             ),
             errors=errors,
+            description_placeholders={"name": self.config_entry.title},
         )
 
     @callback

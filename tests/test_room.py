@@ -197,6 +197,7 @@ async def test_options_change_applies_to_running_group(
 
     # Remove the Pico through the options flow; the group reloads without it.
     flow = await hass.config_entries.options.async_init(room.entry.entry_id)
+    assert flow["description_placeholders"]["name"] == "Living Room"
     # The Pico section opens expanded, since this group has one.
     pico_section = flow["data_schema"].schema["pico"]
     assert pico_section.options["collapsed"] is False

@@ -60,7 +60,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Edit aligned cover group",
+        "title": "Edit {name}",
         "description": "Group side-by-side shades so their bottom edges stay level.",
         "data": {
           "covers": "Shades"
