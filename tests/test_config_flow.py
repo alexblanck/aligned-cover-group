@@ -118,3 +118,31 @@ async def test_shade_ranges_must_overlap(hass: HomeAssistant) -> None:
         result["flow_id"], {"open_height": 80, "closed_height": 20}
     )
     assert result["step_id"] == "travel"
+
+
+async def test_halfway_height_must_fit_a_roller(hass: HomeAssistant) -> None:
+    flow = await start_flow(hass)
+    result = await submit_group(hass, flow)
+    for heights in (
+        {"closed_height": 24, "open_height": 84},
+        {"closed_height": 12, "open_height": 84},
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], heights
+        )
+    assert result["step_id"] == "travel"
+    # Tallest shade: 12 to 84, so 50% must be above 30 and at most the midpoint, 48.
+    assert result["description_placeholders"]["low"] == "30"
+    assert result["description_placeholders"]["high"] == "48"
+
+    for too_far in (50, 30):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"travel_time_s": 36, "halfway_height": too_far}
+        )
+        assert result["errors"] == {"base": "halfway_out_of_range"}
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"travel_time_s": 36, "halfway_height": 44}
+    )
+    assert result["type"] == "create_entry"
+    assert result["options"]["halfway_height"] == 44

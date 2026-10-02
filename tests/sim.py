@@ -11,6 +11,7 @@ stationary shades to their favorite position.
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -33,7 +34,7 @@ from custom_components.aligned_cover_group.const import DOMAIN
 
 GROUP = "cover.living_room"
 FAVORITE = 50
-STEP_S = 0.25  # simulated time per tick
+STEP_S = 0.1  # simulated time per tick
 
 
 @dataclass
@@ -62,13 +63,30 @@ class Bridge:
 
 @dataclass
 class ShadeSpec:
-    """A physical shade: geometry as configured, and its true speed."""
+    """A physical shade: geometry as configured, and its true speed.
+
+    Its position counts motor turns. With `roll_curvature`, it's a roller whose
+    roll shrinks as it unwinds, so each turn lowers the hemline a little less
+    than the one before.
+    """
 
     name: str
     closed_height: float
     open_height: float
     travel_time_s: float
     position_pct: float = 0
+    roll_curvature: float = 0.0
+
+    @property
+    def full_turns(self) -> float:
+        """Turns from open to closed, in fabric length at the top of the roll."""
+        span = self.open_height - self.closed_height
+        c = self.roll_curvature
+        return span if c == 0 else (1 - (1 - 4 * c * span) ** 0.5) / (2 * c)
+
+    def hemline_at(self, position_pct: float) -> float:
+        turns = (1 - position_pct / 100) * self.full_turns
+        return self.open_height - (turns - self.roll_curvature * turns * turns)
 
     @classmethod
     def from_config(
@@ -120,9 +138,7 @@ class SimShade(CoverEntity):
 
     @property
     def hemline_height(self) -> float:
-        return self.spec.closed_height + self.position_pct / 100 * (
-            self.spec.open_height - self.spec.closed_height
-        )
+        return self.spec.hemline_at(self.position_pct)
 
     @property
     def current_cover_position(self) -> int:
@@ -279,8 +295,13 @@ class Room:
             self.shades.values(),
             key=lambda shade: shade.spec.open_height - shade.spec.closed_height,
         )
-        travel_time_s = self._configured_travel_time_s or tallest.spec.travel_time_s
-        return await configure(flow["flow_id"], {"travel_time_s": travel_time_s})
+        answers: dict[str, float] = {
+            "travel_time_s": self._configured_travel_time_s
+            or tallest.spec.travel_time_s
+        }
+        if tallest.spec.roll_curvature:
+            answers["halfway_height"] = tallest.spec.hemline_at(50)
+        return await configure(flow["flow_id"], answers)
 
     async def command(self, service: str, **data: Any) -> None:
         """Call a cover service on the group."""
@@ -291,10 +312,8 @@ class Room:
 
     async def run(self, seconds: float) -> None:
         """Advance simulated time, letting timers fire and motors move."""
-        elapsed_s = 0.0
-        while elapsed_s < seconds:
+        for _ in range(math.ceil(round(seconds / STEP_S, 6))):
             self.freezer.tick(timedelta(seconds=STEP_S))
-            elapsed_s += STEP_S
             async_fire_time_changed_exact(self.hass)
             await self.hass.async_block_till_done()
             for shade in self.shades.values():
@@ -339,10 +358,7 @@ class Room:
         specs = {eid: shade.spec for eid, shade in self.shades.items()}
 
         def hemline_height(eid: str) -> float:
-            spec = specs[eid]
-            return spec.closed_height + positions_pct_by_id[eid] / 100 * (
-                spec.open_height - spec.closed_height
-            )
+            return specs[eid].hemline_at(positions_pct_by_id[eid])
 
         best = float("inf")
         for candidate in (hemline_height(eid) for eid in specs):

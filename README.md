@@ -15,6 +15,12 @@ stops at exactly the same moment.
 - All shades are assumed to move at the same speed (inches per second), as
   shades from the same product line usually do. Shades that move at different
   speeds still end up level, but drift apart while moving.
+- Roller shades don't move evenly: the roll is fattest when open, so the
+  hemline drops faster near the top, and shades of different lengths drift out
+  of line partway even when level at the ends. If that happens, enter the
+  tallest shade's hemline height at 50% during setup. This assumes every shade
+  in the group is the same kind of roller (same fabric and tube, fully rolled
+  up when open), differing only in where its bottom limit is set.
 - The group's 0–100% position is a shared hemline height. Each shade is sent
   to whatever position puts its hemline there (clamped to its own range).
 - When shades start from different heights, the lowest (or highest) one starts

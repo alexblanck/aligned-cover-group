@@ -39,12 +39,14 @@
       },
       "travel": {
         "title": "Travel time",
-        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.",
+        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.\n\nRoller shades also don't move evenly: the roll is fattest when open, so the hemline drops faster near the top. If your shades' hemlines don't line up partway, set {name} to 50% on its own and enter its hemline height. This assumes every shade in the group uses the same fabric and tube.",
         "data": {
-          "travel_time_s": "Full travel time"
+          "travel_time_s": "Full travel time",
+          "halfway_height": "Hemline height at 50% (optional)"
         },
         "data_description": {
-          "travel_time_s": "If you're unsure, round down rather than up."
+          "travel_time_s": "If you're unsure, round down rather than up.",
+          "halfway_height": "For {name}, between {low} and {high}. Leave empty if the shades line up partway already."
         }
       }
     },
@@ -54,7 +56,8 @@
       "closed_not_below_open": "The closed height must be below the open height.",
       "cover_unsupported": "Every shade must support setting a position and stopping.",
       "pico_duplicate": "Choose a different button for each Pico role.",
-      "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height."
+      "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height.",
+      "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights."
     }
   },
   "options": {
@@ -95,12 +98,14 @@
       },
       "travel": {
         "title": "Travel time",
-        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.",
+        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.\n\nRoller shades also don't move evenly: the roll is fattest when open, so the hemline drops faster near the top. If your shades' hemlines don't line up partway, set {name} to 50% on its own and enter its hemline height. This assumes every shade in the group uses the same fabric and tube.",
         "data": {
-          "travel_time_s": "Full travel time"
+          "travel_time_s": "Full travel time",
+          "halfway_height": "Hemline height at 50% (optional)"
         },
         "data_description": {
-          "travel_time_s": "If you're unsure, round down rather than up."
+          "travel_time_s": "If you're unsure, round down rather than up.",
+          "halfway_height": "For {name}, between {low} and {high}. Leave empty if the shades line up partway already."
         }
       }
     },
@@ -110,7 +115,8 @@
       "closed_not_below_open": "The closed height must be below the open height.",
       "cover_unsupported": "Every shade must support setting a position and stopping.",
       "pico_duplicate": "Choose a different button for each Pico role.",
-      "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height."
+      "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height.",
+      "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights."
     }
   }
 }

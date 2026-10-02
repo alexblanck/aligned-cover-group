@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
@@ -46,10 +46,11 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
-from .alignment import AlignmentGroup, Direction, Plan, Shade, Trip
+from .alignment import AlignmentGroup, Direction, Plan, Shade, Trip, roll_curvature
 from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
+    CONF_HALFWAY_HEIGHT,
     CONF_OPEN_HEIGHT,
     CONF_PICO_CLOSE,
     CONF_PICO_OPEN,
@@ -109,20 +110,30 @@ async def async_setup_entry(
 ) -> None:
     """Set up the aligned cover group entity."""
     options = entry.options
-    spans = [
-        shade[CONF_OPEN_HEIGHT] - shade[CONF_CLOSED_HEIGHT]
-        for shade in options[CONF_COVERS]
-    ]
-    # Every shade moves at the speed measured on the tallest one.
-    speed = max(spans) / options[CONF_TRAVEL_TIME_S]
-    group = AlignmentGroup(
+    configs = options[CONF_COVERS]
+    tallest = max(
+        configs, key=lambda shade: shade[CONF_OPEN_HEIGHT] - shade[CONF_CLOSED_HEIGHT]
+    )
+    # All shades share the tallest one's roll (same fabric and tube) and its
+    # turn speed, measured as its travel time.
+    curvature = 0.0
+    if (halfway_height := options.get(CONF_HALFWAY_HEIGHT)) is not None:
+        curvature = roll_curvature(
+            tallest[CONF_CLOSED_HEIGHT], tallest[CONF_OPEN_HEIGHT], halfway_height
+        )
+    shapes = [
         Shade(
             entity_id=shade[CONF_ENTITY_ID],
             closed_height=shade[CONF_CLOSED_HEIGHT],
             open_height=shade[CONF_OPEN_HEIGHT],
-            travel_time_s=span / speed,
+            travel_time_s=1.0,
+            roll_curvature=curvature,
         )
-        for shade, span in zip(options[CONF_COVERS], spans, strict=True)
+        for shade in configs
+    ]
+    turn_speed = max(shape.full_turns for shape in shapes) / options[CONF_TRAVEL_TIME_S]
+    group = AlignmentGroup(
+        replace(shape, travel_time_s=shape.full_turns / turn_speed) for shape in shapes
     )
     pico = None
     if options.get(CONF_PICO_OPEN):
@@ -278,7 +289,9 @@ class AlignedCoverGroup(CoverEntity):
                     "closed_height": shade.closed_height,
                     "open_height": shade.open_height,
                     "travel_time_s": shade.travel_time_s,
-                    "speed": shade.speed,
+                    "roll_curvature": shade.roll_curvature,
+                    "full_turns": shade.full_turns,
+                    "turn_speed": shade.turn_speed,
                     "reported_position_pct": (
                         position_pct := self._positions_pct_by_id.get(shade.entity_id)
                     ),

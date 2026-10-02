@@ -20,7 +20,8 @@ from .common import HIGH_SILL, LOW_SILL, SHADES, SPEED
 from .sim import FAVORITE, GROUP, ShadeSpec, build_room
 
 # Hemline spread allowed while moving, in inches: timers fire on the next
-# 0.25 s tick (0.5 in at 2 in/s), plus whole-percent position rounding.
+# 0.1 s tick (up to about 0.5 in for a roller near the top of its travel), plus
+# whole-percent position rounding.
 HEIGHT_TOLERANCE = 1.0
 
 
@@ -543,7 +544,7 @@ async def test_diagnostics_mid_move(
     assert group["state"] == "opening"
     assert group["moving"] is True
     shades = {shade["entity_id"]: shade for shade in group["shades"]}
-    assert shades[LOW_SILL]["speed"] == 2
+    assert shades[LOW_SILL]["turn_speed"] == 2  # turns are inches without a curve
     assert shades[HIGH_SILL]["hemline_height"] == 24
     trips = {trip["entity_id"]: trip for trip in group["trips"]}
     assert trips[LOW_SILL]["estimated_pct"] == 8  # 6 in of 72 after 3 s
@@ -556,3 +557,56 @@ async def test_diagnostics_mid_move(
     assert await get_diagnostics_for_device(hass, hass_client, room.entry, device) == (
         await get_diagnostics_for_config_entry(hass, hass_client, room.entry)
     )
+
+
+# The living room shades this was tuned on: identical rollers (same top,
+# fabric and tube), one with a raised bottom limit. The roll curve was fitted
+# from the taller one measuring 67 1/8 in at 50%; it predicted every other
+# measurement (25/50/75% on both shades) to within 3/8 in.
+ROLL_CURVATURE = 17.5 / 124.75**2
+
+
+def living_room(position_pct: float, calibrated: bool = True) -> list[ShadeSpec]:
+    left_2 = ShadeSpec("left_2", 17.875, 125.125, 24, position_pct, ROLL_CURVATURE)
+    left_1 = ShadeSpec("left_1", 49.75, 125.125, 0, position_pct, ROLL_CURVATURE)
+    left_1.travel_time_s = 24 * left_1.full_turns / left_2.full_turns
+    return [left_1, left_2]
+
+
+async def test_roller_measurements_match_the_simulation() -> None:
+    left_1, left_2 = living_room(0)
+    measured = {25: (67, 41.375), 50: (85.125, 67.125), 75: (104.75, 95)}
+    for position_pct, (left_1_height, left_2_height) in measured.items():
+        assert left_1.hemline_at(position_pct) == pytest.approx(left_1_height, abs=0.4)
+        assert left_2.hemline_at(position_pct) == pytest.approx(left_2_height, abs=0.1)
+
+
+@pytest.mark.parametrize("target_pct", [25, 50, 75])
+async def test_rollers_level_at_rest(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, target_pct: int
+) -> None:
+    room = await build_room(hass, freezer, living_room(100), pico=False)
+
+    await room.command("set_cover_position", position=target_pct)
+    await room.run_until_still()
+
+    final = {eid: shade.position_pct for eid, shade in room.shades.items()}
+    assert room.misalignment(final) <= HEIGHT_TOLERANCE
+    assert room.group.attributes["aligned"] is True
+
+
+@pytest.mark.parametrize("pico", [True, False], ids=["pico", "no-pico"])
+async def test_rollers_stay_level_while_moving(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, pico: bool
+) -> None:
+    room = await build_room(hass, freezer, living_room(0), pico)
+
+    await room.command("open_cover")
+    await room.run_until_still()
+    await room.command("set_cover_position", position=40)
+    await room.run_until_still()
+    await room.command("close_cover")
+    await room.run_until_still()
+
+    assert room.positions_pct_by_id() == {"cover.left_1": 0, "cover.left_2": 0}
+    assert room.worst_misalignment() <= HEIGHT_TOLERANCE

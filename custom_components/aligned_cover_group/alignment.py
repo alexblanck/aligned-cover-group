@@ -10,6 +10,7 @@ configured (e.g. inches from the floor).
 
 from __future__ import annotations
 
+import math
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -27,14 +28,49 @@ class Direction(StrEnum):
     CLOSING = "closing"
 
 
+def roll_curvature(
+    closed_height: float, open_height: float, halfway_height: float
+) -> float:
+    """Roll curvature from a shade's hemline height at 50%.
+
+    See `Shade`. Zero means the hemline moves in a straight line with position.
+    """
+    span = open_height - closed_height
+    halfway_drop = open_height - halfway_height
+    # From drop(t) = t - c t^2 at half and all of the shade's turns.
+    extra = 2 * (2 * halfway_drop - span)
+    return extra / (span + extra) ** 2
+
+
+def halfway_height_range(
+    closed_height: float, open_height: float
+) -> tuple[float, float]:
+    """Halfway heights (exclusive low, inclusive high) a roller can have.
+
+    The highest is the straight-line midpoint; below about a quarter of the way
+    up the curve would turn back on itself.
+    """
+    span = open_height - closed_height
+    return open_height - 3 * span / 4, open_height - span / 2
+
+
 @dataclass(frozen=True)
 class Shade:
-    """Geometry and speed of one shade."""
+    """Geometry and speed of one shade.
+
+    A roller shade's position counts motor turns, not height: the roll is
+    fattest when open, so a turn near the top lowers more fabric than one near
+    the bottom. Turns are measured from fully open in units of fabric length at
+    the top of the roll, so `turns` turns lower the hemline by
+    `turns - roll_curvature * turns**2`. With no curvature, turns are just
+    height. Turns change at a constant rate while the motor runs.
+    """
 
     entity_id: str
     closed_height: float
     open_height: float
     travel_time_s: float
+    roll_curvature: float = 0.0
 
     @property
     def span(self) -> float:
@@ -42,13 +78,27 @@ class Shade:
         return self.open_height - self.closed_height
 
     @property
-    def speed(self) -> float:
-        """Hemline speed in height units per second."""
-        return self.span / self.travel_time_s
+    def full_turns(self) -> float:
+        """Turns from fully open to fully closed."""
+        return self._turns_for_drop(self.span)
+
+    @property
+    def turn_speed(self) -> float:
+        """Turns per second while moving."""
+        return self.full_turns / self.travel_time_s
+
+    def turns_down(self, position_pct: float) -> float:
+        """Turns from fully open at a shade position."""
+        return (1 - position_pct / 100) * self.full_turns
+
+    def turns_down_at(self, hemline_height: float) -> float:
+        """Turns from fully open that put the hemline at `hemline_height`."""
+        return self._turns_for_drop(self.open_height - self.clamp(hemline_height))
 
     def hemline_height(self, position_pct: int) -> float:
         """Hemline height at a shade position."""
-        return self.closed_height + position_pct / 100 * self.span
+        turns = self.turns_down(position_pct)
+        return self.open_height - (turns - self.roll_curvature * turns**2)
 
     def clamp(self, hemline_height: float) -> float:
         """The closest hemline height this shade can reach."""
@@ -56,8 +106,15 @@ class Shade:
 
     def position_pct_for(self, hemline_height: float) -> int:
         """Shade position that puts the hemline closest to `hemline_height`."""
-        position_pct = (hemline_height - self.closed_height) / self.span * 100
+        turns = self.turns_down_at(hemline_height)
+        position_pct = (1 - turns / self.full_turns) * 100
         return round(min(100.0, max(0.0, position_pct)))
+
+    def _turns_for_drop(self, drop: float) -> float:
+        if self.roll_curvature == 0:
+            return drop
+        c = self.roll_curvature
+        return (1 - math.sqrt(max(0.0, 1 - 4 * c * drop))) / (2 * c)
 
 
 @dataclass(frozen=True)
@@ -296,7 +353,11 @@ def _staggered(trips: list[Trip]) -> list[Trip]:
     return [
         replace(
             trip,
-            delay_s=abs(trip.from_height - leader.from_height) / leader.shade.speed,
+            delay_s=abs(
+                leader.shade.turns_down_at(trip.from_height)
+                - leader.shade.turns_down(leader.from_pct)
+            )
+            / leader.shade.turn_speed,
         )
         for trip in trips
     ]

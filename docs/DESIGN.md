@@ -62,9 +62,37 @@ type service (`DeviceEntryType.SERVICE`):
 
 ## Position math
 
+### Roller curve
+
+A shade's position counts motor turns, not height. A roller's roll is fattest
+when open, so each turn lowers the hemline a bit less than the one before.
+Measuring turns from fully open, in units of fabric length at the top of the
+roll, `t` turns lower the hemline by `t - c t^2`; `c = 0` is a straight line.
+`c` comes from one optional measurement, the tallest shade's hemline at 50%,
+and is shared by every shade.
+
+**Assumption:** all shades in a group are the same roller (same fabric and
+tube, fully rolled when open), differing only in their bottom limit. That's
+true of the setup this was built on; it isn't true in general (different
+fabrics or tube sizes have different curves), which would need a measurement
+per shade.
+
+Because turns change at a constant rate while the motor runs, and aligned
+identical rolls are always the same number of turns from the top, staggered
+starts are timed in turns: a follower starts when the leader has turned down
+to the follower's hemline.
+
+Fitted on two shades from a 67 1/8 in reading at 50%, the curve predicted the
+other five measurements (25/50/75% on both) to within 3/8 in, where a straight
+line was off by up to 4 3/8 in.
+
+### Group position
+
 - Group range: lowest `closed_height` (0%) to highest `open_height` (100%).
-- Group position → hemline `H` → each shade's position:
-  `clamp((H - closed) / (open - closed) * 100, 0, 100)`.
+- Group position → hemline `H` (linear across the group's range) → each
+  shade's position: the turns that put its hemline at `H` (clamped to its
+  range), as a fraction of its full turns. Without a roller curve that's
+  `(H - closed) / (open - closed) * 100`.
 - Aligned: there's a group hemline height `H` that would put every shade where
   it is (each shade's hemline within 1% of the group's range of `H` clamped to
   that shade's range). `H` is the average hemline of the shades that are

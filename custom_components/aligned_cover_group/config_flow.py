@@ -25,9 +25,11 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
+from .alignment import halfway_height_range
 from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
+    CONF_HALFWAY_HEIGHT,
     CONF_OPEN_HEIGHT,
     CONF_TRAVEL_TIME_S,
     DOMAIN,
@@ -57,6 +59,7 @@ TRAVEL_SCHEMA = vol.Schema(
                 mode=selector.NumberSelectorMode.BOX,
             )
         ),
+        vol.Optional(CONF_HALFWAY_HEIGHT): _HEIGHT,
     }
 )
 
@@ -135,7 +138,7 @@ class _ShadeSteps(ConfigEntryBaseFlow):
     _group: dict[str, Any]
     _shades: list[dict[str, Any]]
     _previous: dict[str, dict[str, Any]]
-    _previous_travel_time_s: float | None
+    _previous_travel: dict[str, Any]
 
     def _start_shades(self, group: dict[str, Any]) -> None:
         self._group = {key: value for key, value in group.items() if value}
@@ -176,24 +179,34 @@ class _ShadeSteps(ConfigEntryBaseFlow):
     async def async_step_travel(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Collect the tallest shade's travel time."""
-        if user_input is not None:
-            return self._async_finish(
-                {**self._group, CONF_COVERS: self._shades, **user_input}
-            )
-
+        """Collect the tallest shade's travel time and, optionally, its curve."""
         tallest = max(
             self._shades,
             key=lambda shade: shade[CONF_OPEN_HEIGHT] - shade[CONF_CLOSED_HEIGHT],
         )
-        suggested = {}
-        if self._previous_travel_time_s is not None:
-            suggested[CONF_TRAVEL_TIME_S] = self._previous_travel_time_s
+        low, high = halfway_height_range(
+            tallest[CONF_CLOSED_HEIGHT], tallest[CONF_OPEN_HEIGHT]
+        )
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            halfway_height = user_input.get(CONF_HALFWAY_HEIGHT)
+            if halfway_height is not None and not low < halfway_height <= high:
+                errors["base"] = "halfway_out_of_range"
+            else:
+                return self._async_finish(
+                    {**self._group, CONF_COVERS: self._shades, **user_input}
+                )
+
         return self.async_show_form(
             step_id="travel",
-            data_schema=self.add_suggested_values_to_schema(TRAVEL_SCHEMA, suggested),
+            data_schema=self.add_suggested_values_to_schema(
+                TRAVEL_SCHEMA, user_input or self._previous_travel
+            ),
+            errors=errors,
             description_placeholders={
-                "name": self._friendly_name(tallest[CONF_ENTITY_ID])
+                "name": self._friendly_name(tallest[CONF_ENTITY_ID]),
+                "low": f"{low:.4g}",
+                "high": f"{high:.4g}",
             },
         )
 
@@ -218,7 +231,7 @@ class AlignedCoverGroupConfigFlow(_ShadeSteps, ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the flow."""
         self._previous = {}
-        self._previous_travel_time_s = None
+        self._previous_travel = {}
 
     @staticmethod
     @callback
@@ -267,7 +280,11 @@ class AlignedCoverGroupOptionsFlow(_ShadeSteps, OptionsFlowWithReload):
         self._previous = {
             shade[CONF_ENTITY_ID]: shade for shade in options.get(CONF_COVERS, [])
         }
-        self._previous_travel_time_s = options.get(CONF_TRAVEL_TIME_S)
+        self._previous_travel = {
+            key: options[key]
+            for key in (CONF_TRAVEL_TIME_S, CONF_HALFWAY_HEIGHT)
+            if key in options
+        }
         errors: dict[str, str] = {}
         if user_input is not None:
             group = _flatten_pico(user_input)
