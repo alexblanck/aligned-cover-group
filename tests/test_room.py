@@ -468,7 +468,7 @@ async def test_motion_ends_at_the_planned_end(
     assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
     assert room.group.state == "closing"
 
-    await room.run(8)  # planned end 45 s, plus margin
+    await room.run(6)  # planned end 45 s
     assert room.group.state == "closed"
     await room.command("stop_cover")
     await room.run(10)

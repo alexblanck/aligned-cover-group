@@ -62,11 +62,6 @@ _LOGGER = logging.getLogger(__name__)
 
 ATTR_HEMLINE_HEIGHTS = "hemline_heights"
 
-# Extra time after the planned end before the group stops treating the shades
-# as moving. Caseta shades report their destination immediately, so the plan's
-# timing is the only signal that they've stopped.
-MOTION_END_MARGIN_S = 2.0
-
 
 @dataclass(frozen=True)
 class _Travel:
@@ -415,7 +410,7 @@ class AlignedCoverGroup(CoverEntity):
             async_track_point_in_utc_time(
                 self.hass,
                 self._async_motion_done,
-                started + timedelta(seconds=plan.duration_s + MOTION_END_MARGIN_S),
+                started + timedelta(seconds=plan.duration_s),
             )
         )
         self.async_write_ha_state()
@@ -457,10 +452,11 @@ class AlignedCoverGroup(CoverEntity):
 
     @callback
     def _async_motion_done(self, _now: datetime) -> None:
+        # Caseta shades report their destination immediately, so the plan's
+        # timing is the only sign they've stopped. Ending late is worse than
+        # early: a Pico stop on stationary shades sends them to favorite.
         _LOGGER.debug(
-            "%s: motion finished: planned travel time plus %.0fs margin elapsed",
-            self.entity_id,
-            MOTION_END_MARGIN_S,
+            "%s: motion finished: planned travel time elapsed", self.entity_id
         )
         self._abandon_plan()
         self.async_write_ha_state()

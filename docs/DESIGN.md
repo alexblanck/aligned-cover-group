@@ -47,6 +47,19 @@ time), and each shade's travel time is derived from its own range. Shades with
 different speeds still end level, since each stops at its own target, but
 drift apart mid-move.
 
+## Integration and device type
+
+Semantically this is a helper (a virtual cover computed from real shades),
+but it's declared as a `service` integration, and each group gets a device of
+type service (`DeviceEntryType.SERVICE`):
+
+- Helpers have no easily reachable integration page; a service integration is
+  listed under Integrations, with its own page and debug-logging toggle.
+- Each group's device can be assigned to an area (HA offers this right after
+  setup), which helper entities can't do from the setup flow.
+- Service rather than a physical device type: the real hardware is the
+  shades, already listed under the Lutron integration; the group has none.
+
 ## Position math
 
 - Group range: lowest `closed_height` (0%) to highest `open_height` (100%).
@@ -82,8 +95,12 @@ vice versa for moving down). Implemented as delayed `set_position` calls.
 
 Delayed starts and the end of the move are scheduled at absolute times from
 when the move began, so slow commands to the bridge don't push later starts
-back. A move ends at its planned end plus a 2 s margin: since shades report
-their destination immediately, there's no way to see them actually arrive. If
+back. A move ends exactly at its planned end: since shades report their
+destination immediately, there's no way to see them actually arrive. There's
+deliberately no margin, because ending late is worse than ending early: a stop
+that's still sent through the Pico after the shades have stopped makes them go
+to their favorite position, while one sent just too early merely stops each
+shade separately. For the same reason, round a measured travel time down. If
 a shade reports a position that isn't part of the plan (another command, such
 as a physical Pico press, took over), the group stops following its plan. If a
 starting command fails, the move is abandoned and the error returned to the

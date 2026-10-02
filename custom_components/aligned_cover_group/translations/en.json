@@ -42,6 +42,9 @@
         "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.",
         "data": {
           "travel_time_s": "Full travel time"
+        },
+        "data_description": {
+          "travel_time_s": "If you're unsure, round down rather than up."
         }
       }
     },
@@ -95,6 +98,9 @@
         "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.",
         "data": {
           "travel_time_s": "Full travel time"
+        },
+        "data_description": {
+          "travel_time_s": "If you're unsure, round down rather than up."
         }
       }
     },
