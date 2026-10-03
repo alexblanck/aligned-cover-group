@@ -190,9 +190,13 @@ class _ShadeSteps(ConfigEntryBaseFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             halfway_height = user_input.get(CONF_HALFWAY_HEIGHT)
-            if halfway_height is not None and not low < halfway_height <= high:
+            if halfway_height is None:
+                pass
+            elif not low < halfway_height <= high:
                 errors["base"] = "halfway_out_of_range"
-            else:
+            elif not self._tallest_spans_group(tallest):
+                errors["base"] = "halfway_needs_shared_roll"
+            if not errors:
                 return self._async_finish(
                     {**self._group, CONF_COVERS: self._shades, **user_input}
                 )
@@ -208,6 +212,15 @@ class _ShadeSteps(ConfigEntryBaseFlow):
                 "low": f"{low:.4g}",
                 "high": f"{high:.4g}",
             },
+        )
+
+    def _tallest_spans_group(self, tallest: dict[str, Any]) -> bool:
+        """Whether the tallest shade goes lowest and highest, as one roll would."""
+        lowest = min(shade[CONF_CLOSED_HEIGHT] for shade in self._shades)
+        highest = max(shade[CONF_OPEN_HEIGHT] for shade in self._shades)
+        return bool(
+            tallest[CONF_CLOSED_HEIGHT] == lowest
+            and tallest[CONF_OPEN_HEIGHT] == highest
         )
 
     def _friendly_name(self, entity_id: str) -> str:

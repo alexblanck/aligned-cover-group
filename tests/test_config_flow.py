@@ -146,3 +146,27 @@ async def test_halfway_height_must_fit_a_roller(hass: HomeAssistant) -> None:
     )
     assert result["type"] == "create_entry"
     assert result["options"]["halfway_height"] == 44
+
+
+async def test_halfway_height_needs_the_tallest_shade_to_span_the_group(
+    hass: HomeAssistant,
+) -> None:
+    flow = await start_flow(hass)
+    result = await submit_group(hass, flow)
+    # The taller shade (20 to 80) doesn't reach the other's top (90).
+    for heights in (
+        {"closed_height": 50, "open_height": 90},
+        {"closed_height": 20, "open_height": 80},
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], heights
+        )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"travel_time_s": 30, "halfway_height": 48}
+    )
+    assert result["errors"] == {"base": "halfway_needs_shared_roll"}
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"travel_time_s": 30}
+    )
+    assert result["type"] == "create_entry"

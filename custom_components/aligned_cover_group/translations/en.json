@@ -57,7 +57,8 @@
       "cover_unsupported": "Every shade must support setting a position and stopping.",
       "pico_duplicate": "Choose a different button for each Pico role.",
       "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height.",
-      "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights."
+      "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights.",
+      "halfway_needs_shared_roll": "The 50% height assumes every shade is the same roller, so the tallest shade must have both the lowest closed height and the highest open height. Leave it empty for shades that don't share a top."
     }
   },
   "options": {
@@ -116,7 +117,8 @@
       "cover_unsupported": "Every shade must support setting a position and stopping.",
       "pico_duplicate": "Choose a different button for each Pico role.",
       "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height.",
-      "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights."
+      "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights.",
+      "halfway_needs_shared_roll": "The 50% height assumes every shade is the same roller, so the tallest shade must have both the lowest closed height and the highest open height. Leave it empty for shades that don't share a top."
     }
   }
 }

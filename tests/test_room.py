@@ -544,11 +544,11 @@ async def test_diagnostics_mid_move(
     assert group["state"] == "opening"
     assert group["moving"] is True
     shades = {shade["entity_id"]: shade for shade in group["shades"]}
-    assert shades[LOW_SILL]["turn_speed"] == 2  # turns are inches without a curve
+    assert shades[LOW_SILL]["travel_time_s"] == 36
     assert shades[HIGH_SILL]["hemline_height"] == 24
     trips = {trip["entity_id"]: trip for trip in group["trips"]}
     assert trips[LOW_SILL]["estimated_pct"] == 8  # 6 in of 72 after 3 s
-    assert trips[HIGH_SILL]["delay_s"] == 6
+    assert trips[HIGH_SILL]["delay_s"] == pytest.approx(6)
     assert trips[HIGH_SILL]["estimated_pct"] == 0
 
     # The device page offers the same download.
@@ -610,3 +610,26 @@ async def test_rollers_stay_level_while_moving(
 
     assert room.positions_pct_by_id() == {"cover.left_1": 0, "cover.left_2": 0}
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
+
+
+@pytest.mark.parametrize("target_pct", [25, 50, 75])
+async def test_identical_rollers_follow_the_group_position(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, target_pct: int
+) -> None:
+    # Two identical rollers: the group's percentage should pass straight
+    # through, with no remapping by height.
+    room = await build_room(
+        hass,
+        freezer,
+        [
+            ShadeSpec("a", 17.875, 125.125, 24, 100, ROLL_CURVATURE),
+            ShadeSpec("b", 17.875, 125.125, 24, 100, ROLL_CURVATURE),
+        ],
+        pico=False,
+    )
+
+    await room.command("set_cover_position", position=target_pct)
+    await room.run_until_still()
+
+    assert room.positions_pct_by_id() == {"cover.a": target_pct, "cover.b": target_pct}
+    assert room.group.attributes["current_position"] == target_pct

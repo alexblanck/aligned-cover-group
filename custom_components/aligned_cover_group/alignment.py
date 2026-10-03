@@ -28,93 +28,111 @@ class Direction(StrEnum):
     CLOSING = "closing"
 
 
-def roll_curvature(
-    closed_height: float, open_height: float, halfway_height: float
-) -> float:
-    """Roll curvature from a shade's hemline height at 50%.
-
-    See `Shade`. Zero means the hemline moves in a straight line with position.
-    """
-    span = open_height - closed_height
-    halfway_drop = open_height - halfway_height
-    # From drop(t) = t - c t^2 at half and all of the shade's turns.
-    extra = 2 * (2 * halfway_drop - span)
-    return extra / (span + extra) ** 2
-
-
 def halfway_height_range(
     closed_height: float, open_height: float
 ) -> tuple[float, float]:
     """Halfway heights (exclusive low, inclusive high) a roller can have.
 
-    The highest is the straight-line midpoint; below about a quarter of the way
-    up the curve would turn back on itself.
+    The highest is the straight-line midpoint; at a quarter of the way up or
+    below, the curve would turn back on itself.
     """
     span = open_height - closed_height
-    return open_height - 3 * span / 4, open_height - span / 2
+    return closed_height + span / 4, closed_height + span / 2
+
+
+@dataclass(frozen=True)
+class HemlineCurve:
+    """Hemline height across a 0-100% range of positions.
+
+    Positions count motor rotation, which for a roller isn't proportional to
+    height: the roll is fattest when open, so the hemline moves faster near the
+    top. A roll that shrinks steadily as it unwinds makes height a quadratic in
+    position, so the curve is the quadratic through three points: closed (0%),
+    halfway (50%) and open (100%). With the halfway height at the midpoint it's
+    a straight line.
+    """
+
+    closed_height: float
+    open_height: float
+    halfway_height: float
+
+    @classmethod
+    def straight(cls, closed_height: float, open_height: float) -> HemlineCurve:
+        """A curve where height is proportional to position."""
+        return cls(closed_height, open_height, (closed_height + open_height) / 2)
+
+    def height_at(self, position_pct: float) -> float:
+        """Hemline height at a position."""
+        fraction = position_pct / 100
+        rise, bend = self._shape()
+        return self.closed_height + self._span * (rise * fraction + bend * fraction**2)
+
+    def position_at(self, hemline_height: float) -> float:
+        """Exact (unrounded) position for a height, clamped to the curve's range."""
+        clamped = min(max(hemline_height, self.closed_height), self.open_height)
+        fraction_up = (clamped - self.closed_height) / self._span
+        rise, bend = self._shape()
+        # Solves rise * x + bend * x**2 = fraction_up for x in 0..1, written to
+        # stay accurate when bend is near zero (an almost straight line).
+        discriminant = max(0.0, rise**2 + 4 * bend * fraction_up)
+        return 100 * 2 * fraction_up / (rise + math.sqrt(discriminant))
+
+    def between(self, closed_height: float, open_height: float) -> HemlineCurve:
+        """The part of this curve between two heights, as its own 0-100%.
+
+        A shade on the same roll that only covers part of this range (a raised
+        bottom limit, or a lower top) follows this part of the curve.
+        """
+        middle = (self.position_at(closed_height) + self.position_at(open_height)) / 2
+        return HemlineCurve(closed_height, open_height, self.height_at(middle))
+
+    @property
+    def _span(self) -> float:
+        return self.open_height - self.closed_height
+
+    def _shape(self) -> tuple[float, float]:
+        """Coefficients of height = closed + span * (rise * x + bend * x**2)."""
+        halfway_fraction = (self.halfway_height - self.closed_height) / self._span
+        return 4 * halfway_fraction - 1, 2 - 4 * halfway_fraction
 
 
 @dataclass(frozen=True)
 class Shade:
-    """Geometry and speed of one shade.
+    """One shade: how its hemline height follows its position, and how long a
+    full travel takes. Positions change at a constant rate while moving.
 
-    A roller shade's position counts motor turns, not height: the roll is
-    fattest when open, so a turn near the top lowers more fabric than one near
-    the bottom. Turns are measured from fully open in units of fabric length at
-    the top of the roll, so `turns` turns lower the hemline by
-    `turns - roll_curvature * turns**2`. With no curvature, turns are just
-    height. Turns change at a constant rate while the motor runs.
+    `halfway_height` is the hemline at 50%; without it, height is proportional
+    to position.
     """
 
     entity_id: str
     closed_height: float
     open_height: float
     travel_time_s: float
-    roll_curvature: float = 0.0
+    halfway_height: float | None = None
 
     @property
-    def span(self) -> float:
-        """Distance the hemline travels from closed to open."""
-        return self.open_height - self.closed_height
+    def curve(self) -> HemlineCurve:
+        """This shade's hemline height across its own 0-100%."""
+        if self.halfway_height is None:
+            return HemlineCurve.straight(self.closed_height, self.open_height)
+        return HemlineCurve(self.closed_height, self.open_height, self.halfway_height)
 
-    @property
-    def full_turns(self) -> float:
-        """Turns from fully open to fully closed."""
-        return self._turns_for_drop(self.span)
-
-    @property
-    def turn_speed(self) -> float:
-        """Turns per second while moving."""
-        return self.full_turns / self.travel_time_s
-
-    def turns_down(self, position_pct: float) -> float:
-        """Turns from fully open at a shade position."""
-        return (1 - position_pct / 100) * self.full_turns
-
-    def turns_down_at(self, hemline_height: float) -> float:
-        """Turns from fully open that put the hemline at `hemline_height`."""
-        return self._turns_for_drop(self.open_height - self.clamp(hemline_height))
-
-    def hemline_height(self, position_pct: int) -> float:
+    def hemline_height(self, position_pct: float) -> float:
         """Hemline height at a shade position."""
-        turns = self.turns_down(position_pct)
-        return self.open_height - (turns - self.roll_curvature * turns**2)
+        return self.curve.height_at(position_pct)
 
     def clamp(self, hemline_height: float) -> float:
         """The closest hemline height this shade can reach."""
         return min(max(hemline_height, self.closed_height), self.open_height)
 
+    def exact_position_for(self, hemline_height: float) -> float:
+        """Unrounded shade position that puts the hemline at `hemline_height`."""
+        return self.curve.position_at(hemline_height)
+
     def position_pct_for(self, hemline_height: float) -> int:
         """Shade position that puts the hemline closest to `hemline_height`."""
-        turns = self.turns_down_at(hemline_height)
-        position_pct = (1 - turns / self.full_turns) * 100
-        return round(min(100.0, max(0.0, position_pct)))
-
-    def _turns_for_drop(self, drop: float) -> float:
-        if self.roll_curvature == 0:
-            return drop
-        c = self.roll_curvature
-        return (1 - math.sqrt(max(0.0, 1 - 4 * c * drop))) / (2 * c)
+        return round(self.exact_position_for(hemline_height))
 
 
 @dataclass(frozen=True)
@@ -177,29 +195,33 @@ class AlignmentGroup:
     """A set of shades whose hemlines are kept aligned.
 
     The group's own position runs from the lowest closed height (0%) to the
-    highest open height (100%).
+    highest open height (100%) along `curve`. For shades sharing one roll,
+    that's the tallest shade's curve, so the group's position matches the
+    tallest shade's and identical shades match the group exactly.
     """
 
-    def __init__(self, shades: Iterable[Shade]) -> None:
-        """Initialize the group."""
+    def __init__(
+        self, shades: Iterable[Shade], curve: HemlineCurve | None = None
+    ) -> None:
+        """Initialize the group; without a curve, height is proportional."""
         self.shades = tuple(shades)
         self._entity_ids = {shade.entity_id for shade in self.shades}
         self.closed_height = min(shade.closed_height for shade in self.shades)
         self.open_height = max(shade.open_height for shade in self.shades)
+        self.curve = curve or HemlineCurve.straight(
+            self.closed_height, self.open_height
+        )
         self.height_tolerance = (
             self.open_height - self.closed_height
         ) * ALIGN_TOLERANCE_FRACTION
 
     def hemline_height_for(self, position_pct: int) -> float:
         """Hemline height for a group position."""
-        span = self.open_height - self.closed_height
-        return self.closed_height + position_pct / 100 * span
+        return self.curve.height_at(position_pct)
 
     def position_pct_for(self, hemline_height: float) -> int:
         """Group position for a hemline height."""
-        span = self.open_height - self.closed_height
-        position_pct = (hemline_height - self.closed_height) / span * 100
-        return round(min(100.0, max(0.0, position_pct)))
+        return round(self.curve.position_at(hemline_height))
 
     def common_hemline_height(
         self, positions_pct_by_id: Mapping[str, int]
@@ -353,11 +375,13 @@ def _staggered(trips: list[Trip]) -> list[Trip]:
     return [
         replace(
             trip,
+            # How long the leader takes to move from where it starts to the
+            # follower's hemline: positions change at a constant rate.
             delay_s=abs(
-                leader.shade.turns_down_at(trip.from_height)
-                - leader.shade.turns_down(leader.from_pct)
+                leader.shade.exact_position_for(trip.from_height) - leader.from_pct
             )
-            / leader.shade.turn_speed,
+            / 100
+            * leader.shade.travel_time_s,
         )
         for trip in trips
     ]

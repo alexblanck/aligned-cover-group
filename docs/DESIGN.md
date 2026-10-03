@@ -62,25 +62,40 @@ type service (`DeviceEntryType.SERVICE`):
 
 ## Position math
 
-### Roller curve
+### Hemline curves
 
-A shade's position counts motor turns, not height. A roller's roll is fattest
-when open, so each turn lowers the hemline a bit less than the one before.
-Measuring turns from fully open, in units of fabric length at the top of the
-roll, `t` turns lower the hemline by `t - c t^2`; `c = 0` is a straight line.
-`c` comes from one optional measurement, the tallest shade's hemline at 50%,
-and is shared by every shade.
+A shade's position counts motor rotation, not height. The motor turns steadily,
+so 50% is half the shade's run time from fully open. A roller's roll is fattest
+when open, though, so the hemline moves fastest near the top and slows steadily
+as the roll shrinks; half the run time covers more than half the height.
 
-**Assumption:** all shades in a group are the same roller (same fabric and
-tube, fully rolled when open), differing only in their bottom limit. That's
-true of the setup this was built on; it isn't true in general (different
-fabrics or tube sizes have different curves), which would need a measurement
-per shade.
+A roll that shrinks steadily makes hemline height a quadratic in position, so
+each shade has a `HemlineCurve`: the quadratic through its heights at 0%
+(closed), 50% (`halfway_height`) and 100% (open). With `halfway_height` at the
+midpoint it's a straight line, which is also what's used when no 50% height is
+set. Valid halfway heights are above a quarter of the way up and at most the
+midpoint (a roll can't get fatter as it unwinds, and below a quarter the curve
+would turn back on itself).
 
-Because turns change at a constant rate while the motor runs, and aligned
-identical rolls are always the same number of turns from the top, staggered
-starts are timed in turns: a follower starts when the leader has turned down
-to the follower's hemline.
+**Shared roll (the only case configurable today).** Every shade in a group is
+assumed to be the same roller (same fabric and tube, fully rolled when open),
+differing only in its limits. Then:
+
+- The tallest shade spans the whole group (the setup flow checks this when a
+  50% height is given), and its curve is the group's curve.
+- Every other shade covers part of that curve: from the group position where it
+  reaches fully closed to the one where it reaches fully open (its *window*).
+  Its own curve is that part of the group curve, rescaled to its 0-100%
+  (`HemlineCurve.between`).
+- Its travel time is its window's share of the tallest shade's travel time.
+- Aligned shades keep pace while moving: both have the same remaining roll at
+  the same height.
+
+**Room for mismatched rolls.** The planner only relies on each shade's own
+curve, so shades with different fabrics or tubes could each get their own
+`halfway_height` measurement. Positions would still match at rest; while
+moving they'd drift (their hemline speeds differ), and staggered starts would
+only line them up as each one starts.
 
 Fitted on two shades from a 67 1/8 in reading at 50%, the curve predicted the
 other five measurements (25/50/75% on both) to within 3/8 in, where a straight
@@ -88,11 +103,12 @@ line was off by up to 4 3/8 in.
 
 ### Group position
 
-- Group range: lowest `closed_height` (0%) to highest `open_height` (100%).
-- Group position → hemline `H` (linear across the group's range) → each
-  shade's position: the turns that put its hemline at `H` (clamped to its
-  range), as a fraction of its full turns. Without a roller curve that's
-  `(H - closed) / (open - closed) * 100`.
+- Group range: lowest `closed_height` (0%) to highest `open_height` (100%),
+  following the group's curve. With a shared roll that's the tallest shade's
+  curve, so the group's position equals the tallest shade's, and identical
+  shades sit at exactly the group's position.
+- Group position → hemline `H` (group curve) → each shade's position for `H`
+  (its own curve, clamped to its range).
 - Aligned: there's a group hemline height `H` that would put every shade where
   it is (each shade's hemline within 1% of the group's range of `H` clamped to
   that shade's range). `H` is the average hemline of the shades that are
@@ -120,6 +136,10 @@ from the same hemline. Press Pico open/close, then immediately send
 **Staggered path** — otherwise. Shades moving up start in order from lowest
 hemline; each one starts when the leader's estimated hemline reaches it (and
 vice versa for moving down). Implemented as delayed `set_position` calls.
+
+Staggered starts: a follower starts once the leader has moved from where it
+started to the follower's hemline; since positions change at a constant rate,
+that's the leader's change in position as a share of its travel time.
 
 Delayed starts and the end of the move are scheduled at absolute times from
 when the move began, so slow commands to the bridge don't push later starts

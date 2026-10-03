@@ -41,12 +41,12 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import (
-    async_track_point_in_utc_time,
+    async_call_later,
     async_track_state_change_event,
 )
 from homeassistant.util import dt as dt_util
 
-from .alignment import AlignmentGroup, Direction, Plan, Shade, Trip, roll_curvature
+from .alignment import AlignmentGroup, Direction, HemlineCurve, Plan, Shade, Trip
 from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
@@ -111,29 +111,39 @@ async def async_setup_entry(
     """Set up the aligned cover group entity."""
     options = entry.options
     configs = options[CONF_COVERS]
-    tallest = max(
-        configs, key=lambda shade: shade[CONF_OPEN_HEIGHT] - shade[CONF_CLOSED_HEIGHT]
+    group_curve = HemlineCurve.straight(
+        min(shade[CONF_CLOSED_HEIGHT] for shade in configs),
+        max(shade[CONF_OPEN_HEIGHT] for shade in configs),
     )
-    # All shades share the tallest one's roll (same fabric and tube) and its
-    # turn speed, measured as its travel time.
-    curvature = 0.0
     if (halfway_height := options.get(CONF_HALFWAY_HEIGHT)) is not None:
-        curvature = roll_curvature(
-            tallest[CONF_CLOSED_HEIGHT], tallest[CONF_OPEN_HEIGHT], halfway_height
+        # All shades share one roll, so the tallest shade spans the whole group
+        # and its curve is the group's (the setup flow checks this).
+        group_curve = replace(group_curve, halfway_height=halfway_height)
+
+    def window_pct(shade: dict[str, Any]) -> float:
+        """How much of the group's range this shade covers, in group percent."""
+        return group_curve.position_at(shade[CONF_OPEN_HEIGHT]) - (
+            group_curve.position_at(shade[CONF_CLOSED_HEIGHT])
         )
-    shapes = [
-        Shade(
-            entity_id=shade[CONF_ENTITY_ID],
-            closed_height=shade[CONF_CLOSED_HEIGHT],
-            open_height=shade[CONF_OPEN_HEIGHT],
-            travel_time_s=1.0,
-            roll_curvature=curvature,
-        )
-        for shade in configs
-    ]
-    turn_speed = max(shape.full_turns for shape in shapes) / options[CONF_TRAVEL_TIME_S]
+
+    # Positions change at a steady rate; the tallest shade's travel time sets it.
+    pct_per_s = (
+        max(window_pct(shade) for shade in configs) / options[CONF_TRAVEL_TIME_S]
+    )
     group = AlignmentGroup(
-        replace(shape, travel_time_s=shape.full_turns / turn_speed) for shape in shapes
+        (
+            Shade(
+                entity_id=shade[CONF_ENTITY_ID],
+                closed_height=shade[CONF_CLOSED_HEIGHT],
+                open_height=shade[CONF_OPEN_HEIGHT],
+                travel_time_s=window_pct(shade) / pct_per_s,
+                halfway_height=group_curve.between(
+                    shade[CONF_CLOSED_HEIGHT], shade[CONF_OPEN_HEIGHT]
+                ).halfway_height,
+            )
+            for shade in configs
+        ),
+        group_curve,
     )
     pico = None
     if options.get(CONF_PICO_OPEN):
@@ -283,15 +293,18 @@ class AlignedCoverGroup(CoverEntity):
             "current_position": self.current_cover_position,
             "aligned": self.extra_state_attributes["aligned"],
             "pico": asdict(self._pico) if self._pico else None,
+            "curve": asdict(self._group.curve),
             "shades": [
                 {
                     "entity_id": shade.entity_id,
                     "closed_height": shade.closed_height,
                     "open_height": shade.open_height,
+                    "halfway_height": shade.curve.halfway_height,
                     "travel_time_s": shade.travel_time_s,
-                    "roll_curvature": shade.roll_curvature,
-                    "full_turns": shade.full_turns,
-                    "turn_speed": shade.turn_speed,
+                    "group_window_pct": [
+                        self._group.curve.position_at(shade.closed_height),
+                        self._group.curve.position_at(shade.open_height),
+                    ],
                     "reported_position_pct": (
                         position_pct := self._positions_pct_by_id.get(shade.entity_id)
                     ),
@@ -455,22 +468,19 @@ class AlignedCoverGroup(CoverEntity):
             )
             for trip in plan.trips
         }
-        # Timers run at absolute times, so slow commands below don't delay them.
+        # Timers are set before sending any command, so slow commands below
+        # don't delay them.
         for travel in self._travel.values():
             if travel.trip.needs_command and travel.trip.delay_s > 0:
                 self._timers.append(
-                    async_track_point_in_utc_time(
+                    async_call_later(
                         self.hass,
+                        travel.trip.delay_s,
                         partial(self._async_delayed_start, travel),
-                        travel.start,
                     )
                 )
         self._timers.append(
-            async_track_point_in_utc_time(
-                self.hass,
-                self._async_motion_done,
-                started + timedelta(seconds=plan.duration_s),
-            )
+            async_call_later(self.hass, plan.duration_s, self._async_motion_done)
         )
         self.async_write_ha_state()
 
@@ -493,7 +503,6 @@ class AlignedCoverGroup(CoverEntity):
             raise
 
     async def _async_delayed_start(self, travel: _Travel, _now: datetime) -> None:
-        # `_now` is the scheduled time, so measure lateness on the real clock.
         trip = travel.trip
         _LOGGER.debug(
             "%s: starting %s -> %s%% (timer %+.3fs from schedule)",
