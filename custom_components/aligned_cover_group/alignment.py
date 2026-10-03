@@ -171,25 +171,24 @@ def shared_roll_curve(
 
 @dataclass(frozen=True)
 class Shade:
-    """One shade: how its hemline height follows its position, and how long a
-    full travel takes. Positions change at a constant rate while moving.
-
-    `halfway_height` is the hemline at 50%; without it, height is proportional
-    to position.
+    """One shade: how its hemline height follows its position (`curve`), and
+    how long a full travel takes. Positions change at a constant rate while
+    moving.
     """
 
     entity_id: str
-    closed_height: float
-    open_height: float
+    curve: HemlineCurve
     travel_time_s: float
-    halfway_height: float | None = None
 
     @property
-    def curve(self) -> HemlineCurve:
-        """This shade's hemline height across its own 0-100%."""
-        if self.halfway_height is None:
-            return HemlineCurve.straight(self.closed_height, self.open_height)
-        return HemlineCurve(self.closed_height, self.open_height, self.halfway_height)
+    def closed_height(self) -> float:
+        """Hemline height when fully closed."""
+        return self.curve.closed_height
+
+    @property
+    def open_height(self) -> float:
+        """Hemline height when fully open."""
+        return self.curve.open_height
 
     def hemline_height(self, position_pct: float) -> float:
         """Hemline height at a shade position."""

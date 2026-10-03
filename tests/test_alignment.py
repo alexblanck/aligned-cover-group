@@ -16,7 +16,8 @@ from .common import SHADES, SPEED
 
 HIGH_SILL, LOW_SILL = (
     Shade(
-        **config,
+        config["entity_id"],
+        HemlineCurve.straight(config["closed_height"], config["open_height"]),
         travel_time_s=(config["open_height"] - config["closed_height"]) / SPEED,
     )
     for config in SHADES

@@ -135,12 +135,10 @@ async def async_setup_entry(
         (
             Shade(
                 entity_id=shade[CONF_ENTITY_ID],
-                closed_height=shade[CONF_CLOSED_HEIGHT],
-                open_height=shade[CONF_OPEN_HEIGHT],
-                travel_time_s=window_pct(shade) / pct_per_s,
-                halfway_height=group_curve.rescaled_to(
+                curve=group_curve.rescaled_to(
                     shade[CONF_CLOSED_HEIGHT], shade[CONF_OPEN_HEIGHT]
-                ).halfway_height,
+                ),
+                travel_time_s=window_pct(shade) / pct_per_s,
             )
             for shade in configs
         ),
