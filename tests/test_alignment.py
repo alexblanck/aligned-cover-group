@@ -6,23 +6,21 @@ Most behavior is covered by the simulated scenarios in test_room.py.
 import pytest
 
 from custom_components.aligned_cover_group.alignment import (
-    AlignmentGroup,
-    HemlineCurve,
-    Shade,
     Trip,
+    matched_roll_group,
 )
+from custom_components.aligned_cover_group.roll_profile import RollProfile
 
 from .common import SHADES, SPEED
 
-HIGH_SILL, LOW_SILL = (
-    Shade(
-        config["entity_id"],
-        HemlineCurve.straight(config["closed_height"], config["open_height"]),
-        travel_time_s=(config["open_height"] - config["closed_height"]) / SPEED,
-    )
-    for config in SHADES
+GROUP = matched_roll_group(
+    (
+        (config["entity_id"], config["closed_height"], config["open_height"])
+        for config in SHADES
+    ),
+    travel_time_s=max(c["open_height"] - c["closed_height"] for c in SHADES) / SPEED,
 )
-GROUP = AlignmentGroup([HIGH_SILL, LOW_SILL])
+HIGH_SILL, LOW_SILL = GROUP.shades
 
 
 def positions_pct_by_id(high: int, low: int) -> dict[str, int]:
@@ -85,39 +83,49 @@ def test_impossible_curves_are_rejected(
     closed: float, opened: float, halfway: float
 ) -> None:
     with pytest.raises(ValueError):
-        HemlineCurve(closed, opened, halfway)
+        RollProfile(closed, opened, halfway)
 
 
-def test_slices_of_valid_curves_are_valid() -> None:
-    # Floating point can put a straight curve's midpoint a hair above the
-    # highest allowed halfway height; it must still be accepted.
-    HemlineCurve.straight(14.278, 84.143)
-    straight = HemlineCurve.straight(12, 84)
-    for closed, opened in [(24, 84), (13.1, 83.7), (12.000001, 84)]:
-        straight.rescaled_to(closed, opened)
-    rollers = HemlineCurve(17.875, 125.125, 67.125)
-    rollers.rescaled_to(49.75, 125.125)
+def test_straight_curves_are_valid() -> None:
+    # Its midpoint is computed the same way as the highest allowed halfway
+    # height, so floating point can't push it over.
+    RollProfile.straight(14.278, 84.143)
 
 
-INVERSE_CURVES = {
-    "straight": HemlineCurve.straight(12, 84),
-    "living room": HemlineCurve(17.875, 125.125, 67.125),
-    "nearly the quarter limit": HemlineCurve(12, 84, 30.01),
+def test_views_reach_past_the_measured_shade() -> None:
+    rollers = RollProfile(17.875, 125.125, 67.125)
+    view = rollers.view(10, 140)
+    assert view.closed_pct < 0 < 100 < view.open_pct
+    assert view.closed_height == pytest.approx(10)
+    assert view.open_height == pytest.approx(140)
+
+    # A strongly curved profile flattens out at 37.5, as if the roll ran out of fabric.
+    with pytest.raises(ValueError):
+        RollProfile(40, 100, 60).view(30, 70)
+
+
+INVERSE_PROFILES = {
+    "straight": RollProfile.straight(12, 84),
+    "living room": RollProfile(17.875, 125.125, 67.125),
+    "nearly the quarter limit": RollProfile(12, 84, 30.01),
 }
 
 
-@pytest.mark.parametrize("curve", INVERSE_CURVES.values(), ids=INVERSE_CURVES)
-def test_height_and_position_are_inverses(curve: HemlineCurve) -> None:
-    span = curve.open_height - curve.closed_height
+@pytest.mark.parametrize("profile", INVERSE_PROFILES.values(), ids=INVERSE_PROFILES)
+def test_height_and_position_are_inverses(profile: RollProfile) -> None:
+    span = profile.open_height - profile.closed_height
     for step in range(101):
-        assert curve.position_pct_at(curve.height_at(step)) == pytest.approx(step)
-        height = curve.closed_height + span * step / 100
-        assert curve.height_at(curve.position_pct_at(height)) == pytest.approx(height)
+        assert profile.position_pct_at(profile.height_at(step)) == pytest.approx(step)
+        height = profile.closed_height + span * step / 100
+        assert profile.height_at(profile.position_pct_at(height)) == pytest.approx(
+            height
+        )
 
 
-@pytest.mark.parametrize("curve", INVERSE_CURVES.values(), ids=INVERSE_CURVES)
-def test_height_and_position_clamp_to_the_curve(curve: HemlineCurve) -> None:
-    assert curve.height_at(-20) == curve.closed_height
-    assert curve.height_at(130) == curve.open_height
-    assert curve.position_pct_at(curve.closed_height - 5) == 0
-    assert curve.position_pct_at(curve.open_height + 5) == pytest.approx(100)
+@pytest.mark.parametrize("profile", INVERSE_PROFILES.values(), ids=INVERSE_PROFILES)
+def test_views_clamp_to_their_ends(profile: RollProfile) -> None:
+    view = profile.view(profile.closed_height, profile.open_height)
+    assert view.height_at(-20) == pytest.approx(profile.closed_height)
+    assert view.height_at(130) == pytest.approx(profile.open_height)
+    assert view.position_pct_at(profile.closed_height - 5) == pytest.approx(0)
+    assert view.position_pct_at(profile.open_height + 5) == pytest.approx(100)

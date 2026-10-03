@@ -7,7 +7,8 @@ How to work on Aligned Cover Group. For how alignment and motion work, see
 
 | Path | What's there |
 |---|---|
-| `custom_components/aligned_cover_group/alignment.py` | Pure math: hemline heights, alignment, motion plans. No Home Assistant imports |
+| `custom_components/aligned_cover_group/roll_profile.py` | Pure math: how a roller's hemline height follows its position (`RollProfile`), and a shade's view of one. No Home Assistant imports |
+| `custom_components/aligned_cover_group/alignment.py` | Pure math: building a group from its settings, alignment, motion plans. No Home Assistant imports |
 | `custom_components/aligned_cover_group/cover.py` | The group entity: runs plans as service calls and timers, estimates positions mid-move |
 | `custom_components/aligned_cover_group/config_flow.py` | Create/edit screens (config and options flows) |
 | `custom_components/aligned_cover_group/diagnostics.py` | "Download diagnostics": settings plus the group's live state |
@@ -89,7 +90,7 @@ helpers), which would hide timing bugs.
 
 ## Code conventions
 
-- Keep `alignment.py` free of Home Assistant imports; the entity in `cover.py`
+- Keep `roll_profile.py` and `alignment.py` free of Home Assistant imports; the entity in `cover.py`
   turns its plans into service calls.
 - `*_pct` names hold positions in percent (0 closed, 100 open): whole numbers
   (`int`, like Home Assistant's `current_position`) where shades report or are

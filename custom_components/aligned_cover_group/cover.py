@@ -46,7 +46,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
-from .alignment import AlignmentGroup, Direction, Plan, Shade, Trip, shared_roll_curve
+from .alignment import AlignmentGroup, Direction, Plan, Trip, matched_roll_group
 from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
@@ -110,39 +110,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up the aligned cover group entity."""
     options = entry.options
-    configs = options[CONF_COVERS]
-    # Shades' rolls match at every hemline height, so they share one curve:
-    # the tallest shade's, extended over the whole group (the setup flow checks
-    # it can be).
-    group_curve = shared_roll_curve(
-        ((shade[CONF_CLOSED_HEIGHT], shade[CONF_OPEN_HEIGHT]) for shade in configs),
-        options.get(CONF_HALFWAY_HEIGHT),
-    )
-
-    def window_pct(shade: dict[str, Any]) -> float:
-        """How much of the group's range this shade covers, in group percent."""
-        return group_curve.position_pct_at(shade[CONF_OPEN_HEIGHT]) - (
-            group_curve.position_pct_at(shade[CONF_CLOSED_HEIGHT])
-        )
-
-    # Positions change at a steady rate, set by the travel time measured on the
-    # tallest shade (the longest height range, as the setup flow asks).
-    tallest = max(
-        configs, key=lambda shade: shade[CONF_OPEN_HEIGHT] - shade[CONF_CLOSED_HEIGHT]
-    )
-    pct_per_s = window_pct(tallest) / options[CONF_TRAVEL_TIME_S]
-    group = AlignmentGroup(
+    group = matched_roll_group(
         (
-            Shade(
-                entity_id=shade[CONF_ENTITY_ID],
-                curve=group_curve.rescaled_to(
-                    shade[CONF_CLOSED_HEIGHT], shade[CONF_OPEN_HEIGHT]
-                ),
-                travel_time_s=window_pct(shade) / pct_per_s,
-            )
-            for shade in configs
+            (shade[CONF_ENTITY_ID], shade[CONF_CLOSED_HEIGHT], shade[CONF_OPEN_HEIGHT])
+            for shade in options[CONF_COVERS]
         ),
-        group_curve,
+        options[CONF_TRAVEL_TIME_S],
+        options.get(CONF_HALFWAY_HEIGHT),
     )
     pico = None
     if options.get(CONF_PICO_OPEN):
@@ -292,17 +266,20 @@ class AlignedCoverGroup(CoverEntity):
             "current_position": self.current_cover_position,
             "aligned": self.extra_state_attributes["aligned"],
             "pico": asdict(self._pico) if self._pico else None,
-            "curve": asdict(self._group.curve),
+            "roll_profile": asdict(self._group.view.profile),
+            "group_profile_range_pct": [
+                self._group.view.closed_pct,
+                self._group.view.open_pct,
+            ],
             "shades": [
                 {
                     "entity_id": shade.entity_id,
                     "closed_height": shade.closed_height,
                     "open_height": shade.open_height,
-                    "halfway_height": shade.curve.halfway_height,
                     "travel_time_s": shade.travel_time_s,
-                    "group_window_pct": [
-                        self._group.curve.position_pct_at(shade.closed_height),
-                        self._group.curve.position_pct_at(shade.open_height),
+                    "profile_range_pct": [
+                        shade.view.closed_pct,
+                        shade.view.open_pct,
                     ],
                     "reported_position_pct": (
                         position_pct := self._positions_pct_by_id.get(shade.entity_id)

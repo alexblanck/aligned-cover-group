@@ -25,7 +25,7 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
-from .alignment import halfway_height_range, shared_roll_curve
+from .alignment import matched_roll_group
 from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
@@ -36,6 +36,7 @@ from .const import (
     PICO_BUTTONS,
     PICO_SECTION,
 )
+from .roll_profile import halfway_height_range
 
 _HEIGHT = selector.NumberSelector(
     selector.NumberSelectorConfig(mode=selector.NumberSelectorMode.BOX, step="any")
@@ -217,12 +218,17 @@ class _ShadeSteps(ConfigEntryBaseFlow):
     def _shared_curve_fits(self, halfway_height: float) -> bool:
         """Whether the tallest shade's curve extends over every shade."""
         try:
-            shared_roll_curve(
+            matched_roll_group(
                 (
-                    (shade[CONF_CLOSED_HEIGHT], shade[CONF_OPEN_HEIGHT])
+                    (
+                        shade[CONF_ENTITY_ID],
+                        shade[CONF_CLOSED_HEIGHT],
+                        shade[CONF_OPEN_HEIGHT],
+                    )
                     for shade in self._shades
                 ),
-                halfway_height,
+                travel_time_s=1.0,
+                halfway_height=halfway_height,
             )
         except ValueError:
             return False

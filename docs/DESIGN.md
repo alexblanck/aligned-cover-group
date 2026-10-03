@@ -30,7 +30,7 @@ design relies on:
 
 - **Positions count motor rotation at a steady speed** (most motorized roller
   shades): 50% is half the run time from fully open, not necessarily half the
-  height. See "Hemline curves".
+  height. See "Roll profiles".
 - **Shades report their destination immediately** when commanded, and their
   real position only when stopped; never opening/closing. See "Motion".
 - **For the roller-curve correction, matched rolls:** at any given hemline
@@ -85,7 +85,7 @@ type service (`DeviceEntryType.SERVICE`):
 
 ## Position math
 
-### Hemline curves
+### Roll profiles
 
 A shade's position counts motor rotation, not height. The motor turns steadily,
 so 50% is half the shade's run time from fully open. A roller's roll is fattest
@@ -93,40 +93,40 @@ when open, though, so the hemline moves fastest near the top and slows steadily
 as the roll shrinks; half the run time covers more than half the height.
 
 A roll that shrinks steadily makes hemline height a quadratic in position, so
-each shade has a `HemlineCurve`: the quadratic through its heights at 0%
-(closed), 50% (`halfway_height`) and 100% (open). With `halfway_height` at the
-midpoint it's a straight line, which is also what's used when no 50% height is
-set. Valid halfway heights are above a quarter of the way up and at most the
+the measured shade has a `RollProfile`: the quadratic through its heights at
+0% (closed), 50% (`halfway_height`) and 100% (open). With `halfway_height` at
+the midpoint it's a straight line, which is also what's used when no 50% height
+is set. Valid halfway heights are above a quarter of the way up and at most the
 midpoint (a roll can't get fatter as it unwinds, and below a quarter the curve
 would turn back on itself).
 
 **Matched rolls (the only case configurable today).** Every shade's roll is
 assumed to match the others' at any given hemline height: same fabric and tube,
 and the same amount of fabric wound on whenever the hemlines are level. Then
-every shade follows one height curve, differing only in which part it covers.
+every shade shares one roll profile, differing only in which part of it it sees.
+`matched_roll_group` builds the group from the settings:
 
-- The tallest shade (longest height range) is measured at 50%. Its curve,
-  extended over the whole group (lowest closed to highest open), is the
-  group's curve (`shared_roll_curve`). Extending is the matched-roll
-  assumption applied beyond the measured range; if the curve would flatten out
-  before reaching a shade (as if the roll ran out of fabric), the setup flow
-  rejects the measurement.
-- Each shade covers the part of that curve between its own heights: from the
-  group position where it reaches fully closed to the one where it reaches
-  fully open (its *window*). Its own curve is that part, rescaled to its
-  0-100% (`HemlineCurve.rescaled_to`).
-- Its travel time is its window's size relative to the tallest shade's window,
-  times the tallest shade's measured travel time. (With a curve, the shade with
-  the widest window isn't necessarily the tallest: near the top the hemline
-  moves faster, so the same height takes up fewer positions.)
+- The tallest shade (longest height range) is the measured one; its
+  `RollProfile` is the only profile, validated once.
+- Every shade sees a `RollProfileView` of it (`profile.view(closed, open)`):
+  the part between its own limits, as its own 0-100%. Within a view, positions rescale in a
+  straight line (the motor turns at a steady speed). A shade reaching above or
+  below the measured one has a view extending beyond the profile's 0-100%:
+  that's the matched-roll assumption applied beyond the measured range. If the
+  profile would flatten out before reaching a shade (as if the roll ran out of
+  fabric), the setup flow rejects the measurement.
+- The group's own position is a view too, from the lowest closed to the
+  highest open height, so it matches the tallest shade's position.
+- A shade's travel time is its view's share of the measured shade's, times
+  the measured travel time.
 - Aligned shades keep pace while moving: both have the same remaining roll at
   the same height.
 
 **Room for mismatched rolls.** The planner only relies on each shade's own
-curve, so shades with different fabrics or tubes could each get their own
-`halfway_height` measurement. Positions would still match at rest; while
-moving they'd drift (their hemline speeds differ), and staggered starts would
-only line them up as each one starts.
+view, so shades with different fabrics or tubes could each get their own
+profile (and a view of all of it) from their own 50% measurement. Positions
+would still match at rest; while moving they'd drift (their hemline speeds
+differ), and staggered starts would only line them up as each one starts.
 
 Fitted on two shades from a 67 1/8 in reading at 50%, the curve predicted the
 other five measurements (25/50/75% on both) to within 3/8 in, where a straight
