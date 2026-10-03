@@ -23,7 +23,7 @@ and it relies on how those behave:
   speed, so 50% is half the run time from fully open (not necessarily half the
   height). This is true of most motorized roller shades.
 - Shades report their destination as soon as they're commanded, not their
-  position while moving, so the integration times moves itself.
+  position while moving, so the integration times their movement itself.
 - For the optional roller-curve correction, the shades' rolls match: same
   fabric and tube, and the same amount of fabric wound on whenever their
   hemlines are level. Shades can still differ in where they start and stop.
@@ -44,13 +44,14 @@ Other shades that work the same way should work too, but haven't been tested.
   tallest shade's hemline height at 50% during setup. This assumes the shades'
   rolls match (see Supported shades).
 - The group's 0–100% position stands for a shared hemline height (with the
-  roller-curve correction, it matches the tallest shade's own position). Each
+  roller-curve correction, it matches the position of a shade spanning the
+  group's whole range, such as the tallest one when all the tops line up). Each
   shade is sent to whatever position puts its hemline there (clamped to its
   own range).
 - When shades start from different heights, the lowest (or highest) one starts
   first and the others join as its hemline reaches theirs.
-- With a Pico configured, moves that start from a level hemline begin with a
-  Pico press, and stops during a move go through the Pico, so the bridge
+- With a Pico configured, movements that start from a level hemline begin with
+  a Pico press, and stops while moving go through the Pico, so the bridge
   starts and stops every shade in lockstep. (A shade Pico's middle button
   sends stationary shades to their favorite position, so it's only pressed
   while the group is moving.)
@@ -88,9 +89,9 @@ Besides the usual cover state and position, the group exposes:
 **Download diagnostics** (in the ⋮ menu on the integration's page, or on a
 group's device page) saves a JSON file with the group's settings, the heights
 and speeds it derived from them, each shade's position and hemline height, and
-any move in progress. Attach it when reporting a problem.
+the plan being run, if any. Attach it when reporting a problem.
 
-Turn on debug logging to see each move the group plans: whether it used the
+Turn on debug logging to see each plan the group makes: whether it used the
 Pico (and why not), every shade command with its delay, and stops. Use **Enable
 debug logging** on the integration's page, or for logging that survives
 restarts:

@@ -25,7 +25,7 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
-from .alignment import matched_roll_group
+from .alignment import ShadeConfig, matched_roll_group
 from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
@@ -220,15 +220,15 @@ class _ShadeSteps(ConfigEntryBaseFlow):
         try:
             matched_roll_group(
                 (
-                    (
-                        shade[CONF_ENTITY_ID],
-                        shade[CONF_CLOSED_HEIGHT],
-                        shade[CONF_OPEN_HEIGHT],
+                    ShadeConfig(
+                        entity_id=shade[CONF_ENTITY_ID],
+                        closed_height=shade[CONF_CLOSED_HEIGHT],
+                        open_height=shade[CONF_OPEN_HEIGHT],
                     )
                     for shade in self._shades
                 ),
-                travel_time_s=1.0,
-                halfway_height=halfway_height,
+                tallest_travel_time_s=1.0,
+                tallest_halfway_height=halfway_height,
             )
         except ValueError:
             return False

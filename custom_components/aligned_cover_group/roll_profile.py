@@ -68,7 +68,7 @@ class RollProfile:
                 f"Halfway height {self.halfway_height} must be above {low} "
                 f"and at most {high}"
             )
-        halfway_fraction = (self.halfway_height - self.closed_height) / self._span
+        halfway_fraction = (self.halfway_height - self.closed_height) / self._span()
         # The class is frozen, so derived fields are set by bypassing its
         # __setattr__ (the standard way for frozen dataclasses).
         object.__setattr__(self, "rise", 4 * halfway_fraction - 1)
@@ -78,15 +78,15 @@ class RollProfile:
     def straight(cls, closed_height: float, open_height: float) -> RollProfile:
         """A profile where height is proportional to position."""
         return cls(
-            closed_height,
-            open_height,
-            closed_height + (open_height - closed_height) / 2,
+            closed_height=closed_height,
+            open_height=open_height,
+            halfway_height=closed_height + (open_height - closed_height) / 2,
         )
 
     def height_for_position(self, position_pct: float) -> float:
         """Hemline height at a position (which may be beyond 0-100%)."""
         x = position_pct / 100
-        return self.closed_height + self._span * (self.rise * x + self.bend * x**2)
+        return self.closed_height + self._span() * (self.rise * x + self.bend * x**2)
 
     def position_for_height(self, hemline_height: float) -> float:
         """Position for a height, possibly beyond 0-100%.
@@ -94,7 +94,7 @@ class RollProfile:
         Raises ValueError for heights the profile never reaches: below its
         range, it eventually flattens out, as if the roll ran out of fabric.
         """
-        fraction_up = (hemline_height - self.closed_height) / self._span
+        fraction_up = (hemline_height - self.closed_height) / self._span()
         # Solves rise * x + bend * x**2 = fraction_up for x. The usual formula,
         # (-rise + sqrt(discriminant)) / (2 * bend), loses accuracy as bend
         # nears zero (a near-straight profile) and fails at zero; this
@@ -107,9 +107,10 @@ class RollProfile:
 
     def view(self, closed_height: float, open_height: float) -> RollProfileView:
         """This profile rescaled to run from `closed_height` to `open_height`."""
-        return RollProfileView(self, closed_height, open_height)
+        return RollProfileView(
+            profile=self, closed_height=closed_height, open_height=open_height
+        )
 
-    @property
     def _span(self) -> float:
         return self.open_height - self.closed_height
 

@@ -9,7 +9,7 @@ How to work on Aligned Cover Group. For how alignment and motion work, see
 |---|---|
 | `custom_components/aligned_cover_group/roll_profile.py` | Pure math: how a roller's hemline height follows its position (`RollProfile`), and a shade's view of one. No Home Assistant imports |
 | `custom_components/aligned_cover_group/alignment.py` | Pure math: building a group from its settings, alignment, motion plans. No Home Assistant imports |
-| `custom_components/aligned_cover_group/cover.py` | The group entity: runs plans as service calls and timers, estimates positions mid-move |
+| `custom_components/aligned_cover_group/cover.py` | The group entity: runs plans as service calls and timers, estimates positions while a plan runs |
 | `custom_components/aligned_cover_group/config_flow.py` | Create/edit screens (config and options flows) |
 | `custom_components/aligned_cover_group/diagnostics.py` | "Download diagnostics": settings plus the group's live state |
 | `custom_components/aligned_cover_group/translations/en.json` | UI text for those screens |
@@ -97,6 +97,14 @@ helpers), which would hide timing bugs.
   sent them, fractional (`float`) where worked out along a curve, rounded only
   when commanding a shade. `*_height` names hold hemline heights in the user's
   unit; `*_s` names hold seconds.
+- Construct dataclasses with keyword arguments (`Move(shade=shade,
+  from_pct=0, target_pct=40)`), so each value's meaning is clear at the call.
+- Make anything that calculates a method, not a property, so the call shows
+  that work happens. Properties are for stored values, and for the ones Home
+  Assistant requires (`current_cover_position`, `is_closed` and so on).
+- A plan is a set of moves, one per shade; running a plan carries out its
+  moves. Use "run" for the group's motion as a whole and "move" for a shade's
+  part in it.
 - Home Assistant's `async_` prefix means a coroutine or a `@callback`
   function, never a plain undecorated function.
 - Debug logs should name the group (`self.entity_id`) so multiple groups can be
@@ -116,7 +124,7 @@ Either:
 - **Manual:** copy `custom_components/aligned_cover_group` into your Home
   Assistant config's `custom_components/` folder and restart.
 
-Turn on debug logging (see the README) to see each planned move: the positions
+Turn on debug logging (see the README) to see each plan the group makes: the positions
 it planned from, whether it used the Pico (and why not), and every shade
 command with its delay.
 

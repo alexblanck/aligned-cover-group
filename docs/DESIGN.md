@@ -73,15 +73,14 @@ drift apart mid-move.
 ## Integration and device type
 
 Semantically this is a helper (a virtual cover computed from real shades),
-but it's declared as a `service` integration, and each group gets a device of
-type service (`DeviceEntryType.SERVICE`):
+but it's declared as a `device` integration, and each group gets a device:
 
-- Helpers have no easily reachable integration page; a service integration is
+- Helpers have no easily reachable integration page; a device integration is
   listed under Integrations, with its own page and debug-logging toggle.
 - Each group's device can be assigned to an area (HA offers this right after
   setup), which helper entities can't do from the setup flow.
-- Service rather than a physical device type: the real hardware is the
-  shades, already listed under the Lutron integration; the group has none.
+- Device rather than service: the group controls real shades, if by proxy,
+  so it's listed and used like the devices it stands for.
 
 ## Position math
 
@@ -117,7 +116,9 @@ runs between.
   profile would flatten out before reaching a shade (as if the roll ran out of
   fabric), the setup flow rejects the measurement.
 - The group's own position is a view too, from the lowest closed to the
-  highest open height, so it matches the tallest shade's position.
+  highest open height, so it matches the position of a shade spanning that
+  whole range: the tallest shade, when its range covers every other one's
+  (such as shades sharing a top).
 - A shade's travel time is its view's share of the measured shade's, times
   the measured travel time.
 - Aligned shades keep pace while moving: both have the same remaining roll at
@@ -136,16 +137,17 @@ line was off by up to 4 3/8 in.
 ### Group position
 
 - Group range: lowest `closed_height` (0%) to highest `open_height` (100%),
-  following the group's curve. With a shared roll that's the tallest shade's
-  curve, so the group's position equals the tallest shade's, and identical
-  shades sit at exactly the group's position.
+  following the shared roll profile, so a shade spanning that range sits at
+  exactly the group's position (identical shades, or the tallest when its
+  range covers every other one's).
 - Group position → hemline `H` (group curve) → each shade's position for `H`
   (its own curve, clamped to its range).
-- Aligned: there's a group hemline height `H` that would put every shade where
-  it is (each shade's hemline within 1% of the group's range of `H` clamped to
-  that shade's range). `H` is the average hemline of the shades that are
-  partway, or the group's closed/open height when every shade is fully
-  closed/open.
+- Aligned: every shade's hemline is within 1% of the group's range of one
+  height `H`, where a shade at a limit counts as level with any height past
+  it (fully closed: any height at or below its closed height). So `H` must
+  be at least the hemline of every shade that isn't fully closed, and at most
+  that of every shade that isn't fully open; it's the middle of that range, or
+  the group's closed/open height when every shade is fully closed/open.
 - Reported position: `H` when aligned, otherwise the average hemline. This
   degrades to the average (like HA's cover group) while keeping the slider
   stable after the group itself moved the shades.
@@ -154,11 +156,14 @@ line was off by up to 4 3/8 in.
 
 Commands are open-loop. Caseta shades report their *destination* as soon as
 they're commanded (and their real position only when stopped), never
-opening/closing, so timing comes from the shared speed. While the group's own
-motion is running, a new command plans from *estimated* positions (start
-position, start time, speed) rather than the reported ones, which already show
-the destinations. A shade still on an earlier trip that already sits at its new target is
-sent a command to hold there, otherwise it would carry on to its old target.
+opening/closing, so timing comes from the shared speed. Each command makes a
+*plan*: a *move* for each shade (target and start delay), plus an optional
+Pico press. Running the plan carries out its moves. While a plan runs, the
+group uses *estimated* positions (start position, start time, speed) rather
+than the reported ones, which already show the destinations: for its own
+position and attributes (refreshed every second), and for planning a new
+command. A shade still on an earlier move that already sits at its new target
+is sent a command to hold there, otherwise it would carry on to its old target.
 
 **Pico path** — used when a Pico is configured *and* every shade the Pico would
 move (all shades not already at the endpoint in the direction of travel) starts
@@ -173,9 +178,9 @@ Staggered starts: a follower starts once the leader has moved from where it
 started to the follower's hemline; since positions change at a constant rate,
 that's the leader's change in position as a share of its travel time.
 
-Delayed starts and the end of the move are scheduled at absolute times from
-when the move began, so slow commands to the bridge don't push later starts
-back. A move ends exactly at its planned end: since shades report their
+Delayed starts and the end of the run are scheduled at absolute times from
+when the run began, so slow commands to the bridge don't push later starts
+back. A run ends exactly at its planned end: since shades report their
 destination immediately, there's no way to see them actually arrive. There's
 deliberately no margin, because ending late is worse than ending early: a stop
 that's still sent through the Pico after the shades have stopped makes them go
@@ -183,7 +188,7 @@ to their favorite position, while one sent just too early merely stops each
 shade separately. For the same reason, round a measured travel time down. If
 a shade reports a position that isn't part of the plan (another command, such
 as a physical Pico press, took over), the group stops following its plan. If a
-starting command fails, the move is abandoned and the error returned to the
+starting command fails, the plan is abandoned and the error returned to the
 caller.
 
 **Stop** — cancel any pending staggered starts, then:

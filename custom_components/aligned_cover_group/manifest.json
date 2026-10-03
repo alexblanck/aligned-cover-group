@@ -4,7 +4,7 @@
   "codeowners": ["@alexblanck"],
   "config_flow": true,
   "documentation": "https://github.com/alexblanck/aligned-cover-group",
-  "integration_type": "service",
+  "integration_type": "device",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/alexblanck/aligned-cover-group/issues",
   "requirements": [],

@@ -17,7 +17,7 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from .common import HIGH_SILL, LOW_SILL, SHADES, SPEED
-from .sim import FAVORITE, GROUP, ShadeSpec, build_room
+from .sim import FAVORITE, GROUP, STEP_S, ShadeSpec, build_room
 
 # Hemline spread allowed while moving, in inches: timers fire on the next
 # 0.1 s tick (up to about 0.5 in for a roller near the top of its travel), plus
@@ -176,7 +176,22 @@ async def test_different_tops_and_sills(
     room = await build_room(
         hass,
         freezer,
-        [ShadeSpec("left", 10, 60, 25, 0), ShadeSpec("right", 20, 80, 30, 0)],
+        [
+            ShadeSpec(
+                name="left",
+                closed_height=10,
+                open_height=60,
+                travel_time_s=25,
+                position_pct=0,
+            ),
+            ShadeSpec(
+                name="right",
+                closed_height=20,
+                open_height=80,
+                travel_time_s=30,
+                position_pct=0,
+            ),
+        ],
         pico,
     )
 
@@ -314,9 +329,27 @@ async def test_open_and_close_from_shuffled_positions(
 ) -> None:
     # Three shades of different sizes and speeds, starting out of line.
     specs = [
-        ShadeSpec("a", 24, 84, 30, start_pcts[0]),
-        ShadeSpec("b", 12, 84, 36, start_pcts[1]),
-        ShadeSpec("c", 30, 72, 15, start_pcts[2]),
+        ShadeSpec(
+            name="a",
+            closed_height=24,
+            open_height=84,
+            travel_time_s=30,
+            position_pct=start_pcts[0],
+        ),
+        ShadeSpec(
+            name="b",
+            closed_height=12,
+            open_height=84,
+            travel_time_s=36,
+            position_pct=start_pcts[1],
+        ),
+        ShadeSpec(
+            name="c",
+            closed_height=30,
+            open_height=72,
+            travel_time_s=15,
+            position_pct=start_pcts[2],
+        ),
     ]
     room = await build_room(hass, freezer, specs, pico)
 
@@ -430,7 +463,7 @@ async def test_failed_command(
     assert room.positions_pct_by_id() == {HIGH_SILL: 0, LOW_SILL: 0}
 
 
-async def test_options_change_mid_move(
+async def test_options_change_mid_run(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
     room = await build_room(hass, freezer, same_tops(0))
@@ -452,7 +485,7 @@ async def test_options_change_mid_move(
     assert room.group.state != "opening"
 
 
-async def test_group_has_its_own_service_device(
+async def test_group_has_its_own_device(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
     room = await build_room(hass, freezer, same_tops(0))
@@ -460,7 +493,7 @@ async def test_group_has_its_own_service_device(
     entity = er.async_get(hass).async_get("cover.living_room")
     device = dr.async_get(hass).async_get(entity.device_id)
     assert device.name == "Living Room"
-    assert device.entry_type is dr.DeviceEntryType.SERVICE
+    assert device.entry_type is None
     assert device.config_entries == {room.entry.entry_id}
 
 
@@ -526,7 +559,7 @@ async def test_physical_pico_stop_takes_over(
     assert room.positions_pct_by_id() == {HIGH_SILL: 67, LOW_SILL: 72}
 
 
-async def test_diagnostics_mid_move(
+async def test_diagnostics_mid_run(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     hass_client: ClientSessionGenerator,
@@ -546,10 +579,10 @@ async def test_diagnostics_mid_move(
     shades = {shade["entity_id"]: shade for shade in group["shades"]}
     assert shades[LOW_SILL]["travel_time_s"] == 36
     assert shades[HIGH_SILL]["hemline_height"] == 24
-    trips = {trip["entity_id"]: trip for trip in group["trips"]}
-    assert trips[LOW_SILL]["estimated_pct"] == 8  # 6 in of 72 after 3 s
-    assert trips[HIGH_SILL]["delay_s"] == pytest.approx(6)
-    assert trips[HIGH_SILL]["estimated_pct"] == 0
+    moves = {move["entity_id"]: move for move in group["moves"]}
+    assert moves[LOW_SILL]["estimated_pct"] == 8  # 6 in of 72 after 3 s
+    assert moves[HIGH_SILL]["delay_s"] == pytest.approx(6)
+    assert moves[HIGH_SILL]["estimated_pct"] == 0
 
     # The device page offers the same download.
     device_id = er.async_get(hass).async_get(GROUP).device_id
@@ -567,8 +600,22 @@ ROLL_CURVATURE = 17.5 / 124.75**2
 
 
 def living_room(position_pct: float, calibrated: bool = True) -> list[ShadeSpec]:
-    left_2 = ShadeSpec("left_2", 17.875, 125.125, 24, position_pct, ROLL_CURVATURE)
-    left_1 = ShadeSpec("left_1", 49.75, 125.125, 0, position_pct, ROLL_CURVATURE)
+    left_2 = ShadeSpec(
+        name="left_2",
+        closed_height=17.875,
+        open_height=125.125,
+        travel_time_s=24,
+        position_pct=position_pct,
+        roll_curvature=ROLL_CURVATURE,
+    )
+    left_1 = ShadeSpec(
+        name="left_1",
+        closed_height=49.75,
+        open_height=125.125,
+        travel_time_s=0,
+        position_pct=position_pct,
+        roll_curvature=ROLL_CURVATURE,
+    )
     left_1.travel_time_s = 24 * left_1.full_turns / left_2.full_turns
     return [left_1, left_2]
 
@@ -612,6 +659,26 @@ async def test_rollers_stay_level_while_moving(
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
+async def test_position_climbs_steadily_while_opening(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    # Both at 50%, so misaligned; opening starts the lower one first. Shades
+    # report their destination as soon as they're commanded, so the group
+    # must estimate where they are rather than jump to 100% when one starts.
+    room = await build_room(hass, freezer, living_room(50), pico=False)
+
+    await room.command("open_cover")
+    reported = []
+    while room.group.state == "opening":
+        reported.append(room.group.attributes["current_position"])
+        await room.run(STEP_S)
+
+    assert reported == sorted(reported)
+    assert 90 < reported[-1] < 100
+    assert len(set(reported)) > 5  # refreshed as the shades move
+    assert room.group.attributes["current_position"] == 100
+
+
 @pytest.mark.parametrize("target_pct", [25, 50, 75])
 async def test_identical_rollers_follow_the_group_position(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory, target_pct: int
@@ -622,8 +689,22 @@ async def test_identical_rollers_follow_the_group_position(
         hass,
         freezer,
         [
-            ShadeSpec("a", 17.875, 125.125, 24, 100, ROLL_CURVATURE),
-            ShadeSpec("b", 17.875, 125.125, 24, 100, ROLL_CURVATURE),
+            ShadeSpec(
+                name="a",
+                closed_height=17.875,
+                open_height=125.125,
+                travel_time_s=24,
+                position_pct=100,
+                roll_curvature=ROLL_CURVATURE,
+            ),
+            ShadeSpec(
+                name="b",
+                closed_height=17.875,
+                open_height=125.125,
+                travel_time_s=24,
+                position_pct=100,
+                roll_curvature=ROLL_CURVATURE,
+            ),
         ],
         pico=False,
     )
@@ -647,9 +728,33 @@ def matched_rolls(position_pct: float) -> list[ShadeSpec]:
     # A stronger curve than the living room's, so extension errors show.
     curvature = 0.0025
     specs = [
-        ShadeSpec("tall", 30, 100, 30, position_pct, curvature, 100),
-        ShadeSpec("high", 50, 125, 0, position_pct, curvature, 100),
-        ShadeSpec("low", 12, 60, 0, position_pct, curvature, 100),
+        ShadeSpec(
+            name="tall",
+            closed_height=30,
+            open_height=100,
+            travel_time_s=30,
+            position_pct=position_pct,
+            roll_curvature=curvature,
+            roll_top_height=100,
+        ),
+        ShadeSpec(
+            name="high",
+            closed_height=50,
+            open_height=125,
+            travel_time_s=0,
+            position_pct=position_pct,
+            roll_curvature=curvature,
+            roll_top_height=100,
+        ),
+        ShadeSpec(
+            name="low",
+            closed_height=12,
+            open_height=60,
+            travel_time_s=0,
+            position_pct=position_pct,
+            roll_curvature=curvature,
+            roll_top_height=100,
+        ),
     ]
     for spec in specs[1:]:
         spec.travel_time_s = 30 * spec.full_turns / specs[0].full_turns

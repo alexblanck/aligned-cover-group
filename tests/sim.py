@@ -109,11 +109,11 @@ class ShadeSpec:
         """A shade matching a setup-flow config (as in `common.SHADES`)."""
         span = config["open_height"] - config["closed_height"]
         return cls(
-            config["entity_id"].removeprefix("cover."),
-            config["closed_height"],
-            config["open_height"],
-            span / speed,
-            position_pct,
+            name=config["entity_id"].removeprefix("cover."),
+            closed_height=config["closed_height"],
+            open_height=config["open_height"],
+            travel_time_s=span / speed,
+            position_pct=position_pct,
         )
 
     @property
@@ -399,7 +399,7 @@ async def build_room(
     configured_travel_time_s: float | None = None,
 ) -> Room:
     """Set up simulated shades (and Pico), then the group via its config flow."""
-    bridge = Bridge(freezer)
+    bridge = Bridge(freezer=freezer)
     shades = [SimShade(spec, bridge) for spec in specs]
     setup_test_component_platform(hass, "cover", shades)
     assert await async_setup_component(hass, "cover", {"cover": {"platform": "test"}})
