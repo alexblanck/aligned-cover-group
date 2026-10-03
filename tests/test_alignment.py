@@ -38,13 +38,13 @@ def positions_pct_by_id(high: int, low: int) -> dict[str, int]:
 )
 def test_group_position_when_aligned(high: int, low: int, expected: int) -> None:
     assert GROUP.common_hemline_height(positions_pct_by_id(high, low)) is not None
-    assert GROUP.current_group_position_pct(positions_pct_by_id(high, low)) == expected
+    assert GROUP.current_position(positions_pct_by_id(high, low)) == expected
 
 
 def test_group_position_falls_back_to_average_hemline() -> None:
     # Hemlines 54 and 48: misaligned, average 51 -> (51 - 12) / 72.
     assert GROUP.common_hemline_height(positions_pct_by_id(50, 50)) is None
-    assert GROUP.current_group_position_pct(positions_pct_by_id(50, 50)) == 54
+    assert GROUP.current_position(positions_pct_by_id(50, 50)) == 54
 
 
 def test_pico_skipped_when_a_shade_it_would_move_should_stay() -> None:
@@ -64,9 +64,7 @@ def test_pico_skipped_when_a_position_is_unknown() -> None:
 
 def test_positions_for_shades_outside_the_group_are_rejected() -> None:
     with pytest.raises(ValueError, match="cover.stranger"):
-        GROUP.current_group_position_pct(
-            {**positions_pct_by_id(0, 0), "cover.stranger": 50}
-        )
+        GROUP.current_position({**positions_pct_by_id(0, 0), "cover.stranger": 50})
 
 
 @pytest.mark.parametrize(
@@ -115,17 +113,19 @@ INVERSE_PROFILES = {
 def test_height_and_position_are_inverses(profile: RollProfile) -> None:
     span = profile.open_height - profile.closed_height
     for step in range(101):
-        assert profile.position_pct_at(profile.height_at(step)) == pytest.approx(step)
+        assert profile.position_for_height(
+            profile.height_for_position(step)
+        ) == pytest.approx(step)
         height = profile.closed_height + span * step / 100
-        assert profile.height_at(profile.position_pct_at(height)) == pytest.approx(
-            height
-        )
+        assert profile.height_for_position(
+            profile.position_for_height(height)
+        ) == pytest.approx(height)
 
 
 @pytest.mark.parametrize("profile", INVERSE_PROFILES.values(), ids=INVERSE_PROFILES)
 def test_views_clamp_to_their_ends(profile: RollProfile) -> None:
     view = profile.view(profile.closed_height, profile.open_height)
-    assert view.height_at(-20) == pytest.approx(profile.closed_height)
-    assert view.height_at(130) == pytest.approx(profile.open_height)
-    assert view.position_pct_at(profile.closed_height - 5) == pytest.approx(0)
-    assert view.position_pct_at(profile.open_height + 5) == pytest.approx(100)
+    assert view.height_for_position(-20) == pytest.approx(profile.closed_height)
+    assert view.height_for_position(130) == pytest.approx(profile.open_height)
+    assert view.position_for_height(profile.closed_height - 5) == pytest.approx(0)
+    assert view.position_for_height(profile.open_height + 5) == pytest.approx(100)

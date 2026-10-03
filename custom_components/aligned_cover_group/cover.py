@@ -74,14 +74,14 @@ class _Travel:
     pico_endpoint_pct: int | None = None
 
     @property
-    def expected_reports_pct(self) -> set[int]:
+    def expected_reports(self) -> set[int]:
         """Positions the shade may report while carrying out this trip."""
         expected = {self.trip.from_pct, self.trip.target_pct}
         if self.pico_endpoint_pct is not None:
             expected.add(self.pico_endpoint_pct)
         return expected
 
-    def estimate_pct(self, now: datetime) -> int:
+    def estimate_position(self, now: datetime) -> int:
         trip = self.trip
         elapsed_s = max(0.0, (now - self.start).total_seconds())
         moved_pct = elapsed_s / trip.shade.travel_time_s * 100
@@ -183,11 +183,11 @@ class AlignedCoverGroup(CoverEntity):
             )
         )
         self.async_on_remove(self._abandon_plan)
-        self._update_positions_pct_by_id()
+        self._update_positions()
 
     @callback
     def _async_member_changed(self, event: Event[EventStateChangedData]) -> None:
-        self._update_positions_pct_by_id()
+        self._update_positions()
         if self._moving:
             self._check_for_outside_command(event.data["entity_id"])
         self.async_write_ha_state()
@@ -204,7 +204,7 @@ class AlignedCoverGroup(CoverEntity):
         position_pct = self._positions_pct_by_id.get(entity_id)
         if travel is None or position_pct is None:
             return
-        if position_pct in travel.expected_reports_pct:
+        if position_pct in travel.expected_reports:
             return
         _LOGGER.info(
             "%s: %s reported %s%%, which isn't part of the current move; "
@@ -216,14 +216,14 @@ class AlignedCoverGroup(CoverEntity):
         self._abandon_plan()
 
     @callback
-    def _update_positions_pct_by_id(self) -> None:
+    def _update_positions(self) -> None:
         self._positions_pct_by_id = {
             entity_id: position_pct
             for entity_id in self._entity_ids
-            if (position_pct := self._current_shade_position_pct(entity_id)) is not None
+            if (position_pct := self._current_shade_position(entity_id)) is not None
         }
 
-    def _current_shade_position_pct(self, entity_id: str) -> int | None:
+    def _current_shade_position(self, entity_id: str) -> int | None:
         if (state := self.hass.states.get(entity_id)) is None:
             return None
         position_pct = state.attributes.get(ATTR_CURRENT_POSITION)
@@ -237,7 +237,7 @@ class AlignedCoverGroup(CoverEntity):
     @property
     def current_cover_position(self) -> int | None:
         """Group position derived from the shades' hemlines."""
-        return self._group.current_group_position_pct(self._positions_pct_by_id)
+        return self._group.current_position(self._positions_pct_by_id)
 
     @property
     def is_closed(self) -> bool | None:
@@ -287,7 +287,7 @@ class AlignedCoverGroup(CoverEntity):
                     "hemline_height": (
                         None
                         if position_pct is None
-                        else shade.hemline_height(position_pct)
+                        else shade.height_for_position(position_pct)
                     ),
                 }
                 for shade in self._group.shades
@@ -302,7 +302,7 @@ class AlignedCoverGroup(CoverEntity):
                     "delay_s": travel.trip.delay_s,
                     "needs_command": travel.trip.needs_command,
                     "start": travel.start.isoformat(),
-                    "estimated_pct": travel.estimate_pct(now),
+                    "estimated_pct": travel.estimate_position(now),
                 }
                 for entity_id, travel in self._travel.items()
             ],
@@ -323,7 +323,10 @@ class AlignedCoverGroup(CoverEntity):
             ),
             ATTR_HEMLINE_HEIGHTS: {
                 shade.entity_id: round(
-                    shade.hemline_height(self._positions_pct_by_id[shade.entity_id]), 1
+                    shade.height_for_position(
+                        self._positions_pct_by_id[shade.entity_id]
+                    ),
+                    1,
                 )
                 for shade in self._group.shades
                 if shade.entity_id in self._positions_pct_by_id
@@ -365,7 +368,7 @@ class AlignedCoverGroup(CoverEntity):
             )
 
     async def _async_move_to(self, target_pct: int) -> None:
-        positions_pct_by_id, positions_source = self._planning_positions_pct_by_id()
+        positions_pct_by_id, positions_source = self._planning_positions()
         moving_entity_ids = set(self._travel) if self._moving else set()
         if missing := [e for e in self._entity_ids if e not in positions_pct_by_id]:
             _LOGGER.warning(
@@ -386,7 +389,7 @@ class AlignedCoverGroup(CoverEntity):
             "Pico %s%s, trips %s, %.1fs",
             self.entity_id,
             target_pct,
-            self._group.hemline_height_for(target_pct),
+            self._group.height_for_position(target_pct),
             positions_source,
             positions_pct_by_id,
             plan.pico,
@@ -404,7 +407,7 @@ class AlignedCoverGroup(CoverEntity):
             self.async_write_ha_state()  # a previous move may have just been abandoned
 
     @callback
-    def _planning_positions_pct_by_id(self) -> tuple[dict[str, int], str]:
+    def _planning_positions(self) -> tuple[dict[str, int], str]:
         """Shade positions to plan a move from, and their source.
 
         Shades may not report position until they stop, so while our own move
@@ -415,7 +418,7 @@ class AlignedCoverGroup(CoverEntity):
         now = dt_util.utcnow()
         return {
             entity_id: (
-                self._travel[entity_id].estimate_pct(now)
+                self._travel[entity_id].estimate_position(now)
                 if entity_id in self._travel
                 else position_pct
             )
@@ -426,7 +429,7 @@ class AlignedCoverGroup(CoverEntity):
         self, positions_pct_by_id: dict[str, int], target_pct: int
     ) -> Direction | None:
         """Which way the group's own position moves, whatever each shade does."""
-        current_pct = self._group.current_group_position_pct(positions_pct_by_id)
+        current_pct = self._group.current_position(positions_pct_by_id)
         if current_pct is None or target_pct == current_pct:
             return None
         return Direction.OPENING if target_pct > current_pct else Direction.CLOSING

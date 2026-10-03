@@ -103,14 +103,15 @@ would turn back on itself).
 **Matched rolls (the only case configurable today).** Every shade's roll is
 assumed to match the others' at any given hemline height: same fabric and tube,
 and the same amount of fabric wound on whenever the hemlines are level. Then
-every shade shares one roll profile, differing only in which part of it it sees.
+every shade shares one roll profile, differing only in the heights its view
+runs between.
 `matched_roll_group` builds the group from the settings:
 
 - The tallest shade (longest height range) is the measured one; its
   `RollProfile` is the only profile, validated once.
 - Every shade sees a `RollProfileView` of it (`profile.view(closed, open)`):
-  the part between its own limits, as its own 0-100%. Within a view, positions rescale in a
-  straight line (the motor turns at a steady speed). A shade reaching above or
+  the profile rescaled to its own limits, as its own 0-100%. Within a view,
+  positions rescale in a straight line (the motor turns at a steady speed). A shade reaching above or
   below the measured one has a view extending beyond the profile's 0-100%:
   that's the matched-roll assumption applied beyond the measured range. If the
   profile would flatten out before reaching a shade (as if the roll ran out of

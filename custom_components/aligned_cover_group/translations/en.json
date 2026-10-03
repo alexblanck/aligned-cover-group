@@ -58,7 +58,7 @@
       "pico_duplicate": "Choose a different button for each Pico role.",
       "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height.",
       "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights.",
-      "halfway_cant_reach": "With this 50% height, the shades' shared curve flattens out before reaching every shade's range, as if the roll ran out of fabric. Check the measurements, or leave the 50% height empty."
+      "halfway_cant_reach": "This 50% height can't fit every shade on one roll curve, so your shades' rolls probably don't match. Leave it empty to align them as if every shade moved in a straight line, or check the measurements."
     }
   },
   "options": {
@@ -118,7 +118,7 @@
       "pico_duplicate": "Choose a different button for each Pico role.",
       "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height.",
       "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights.",
-      "halfway_cant_reach": "With this 50% height, the shades' shared curve flattens out before reaching every shade's range, as if the roll ran out of fabric. Check the measurements, or leave the 50% height empty."
+      "halfway_cant_reach": "This 50% height can't fit every shade on one roll curve, so your shades' rolls probably don't match. Leave it empty to align them as if every shade moved in a straight line, or check the measurements."
     }
   }
 }

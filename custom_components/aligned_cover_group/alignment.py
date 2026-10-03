@@ -54,21 +54,17 @@ class Shade:
         """Hemline height when fully open."""
         return self.view.open_height
 
-    def hemline_height(self, position_pct: float) -> float:
+    def height_for_position(self, position_pct: float) -> float:
         """Hemline height at a shade position."""
-        return self.view.height_at(position_pct)
+        return self.view.height_for_position(position_pct)
 
     def clamp(self, hemline_height: float) -> float:
         """The closest hemline height this shade can reach."""
         return self.view.clamp(hemline_height)
 
-    def exact_position_pct_for(self, hemline_height: float) -> float:
-        """Unrounded position in percent that puts the hemline at `hemline_height`."""
-        return self.view.position_pct_at(hemline_height)
-
-    def position_pct_for(self, hemline_height: float) -> int:
-        """Shade position that puts the hemline closest to `hemline_height`."""
-        return round(self.exact_position_pct_for(hemline_height))
+    def position_for_height(self, hemline_height: float) -> float:
+        """Position that puts the hemline at `hemline_height`."""
+        return self.view.position_for_height(hemline_height)
 
 
 def matched_roll_group(
@@ -98,7 +94,7 @@ def matched_roll_group(
     }
     return AlignmentGroup(
         (
-            Shade(entity_id, view, view.size_pct / 100 * travel_time_s)
+            Shade(entity_id, view, view.profile_fraction * travel_time_s)
             for entity_id, view in views.items()
         ),
         profile.view(
@@ -132,7 +128,7 @@ class Trip:
     @property
     def from_height(self) -> float:
         """Hemline height where the shade starts."""
-        return self.shade.hemline_height(self.from_pct)
+        return self.shade.height_for_position(self.from_pct)
 
     @property
     def arrival_s(self) -> float:
@@ -184,13 +180,13 @@ class AlignmentGroup:
             self.open_height - self.closed_height
         ) * ALIGN_TOLERANCE_FRACTION
 
-    def hemline_height_for(self, position_pct: int) -> float:
+    def height_for_position(self, position_pct: int) -> float:
         """Hemline height for a group position."""
-        return self.view.height_at(position_pct)
+        return self.view.height_for_position(position_pct)
 
-    def position_pct_for(self, hemline_height: float) -> int:
+    def position_for_height(self, hemline_height: float) -> float:
         """Group position for a hemline height."""
-        return round(self.view.position_pct_at(hemline_height))
+        return self.view.position_for_height(hemline_height)
 
     def common_hemline_height(
         self, positions_pct_by_id: Mapping[str, int]
@@ -203,7 +199,9 @@ class AlignmentGroup:
         if height is None:
             return None
         for shade in self._shades_for(positions_pct_by_id.keys()):
-            actual_height = shade.hemline_height(positions_pct_by_id[shade.entity_id])
+            actual_height = shade.height_for_position(
+                positions_pct_by_id[shade.entity_id]
+            )
             if abs(actual_height - shade.clamp(height)) > self.height_tolerance:
                 return None
         return height
@@ -213,7 +211,7 @@ class AlignmentGroup:
     ) -> float | None:
         shades = self._shades_for(positions_pct_by_id.keys())
         partway = [
-            shade.hemline_height(positions_pct_by_id[shade.entity_id])
+            shade.height_for_position(positions_pct_by_id[shade.entity_id])
             for shade in shades
             if 0 < positions_pct_by_id[shade.entity_id] < 100
         ]
@@ -225,9 +223,7 @@ class AlignmentGroup:
             return self.open_height
         return None
 
-    def current_group_position_pct(
-        self, positions_pct_by_id: Mapping[str, int]
-    ) -> int | None:
+    def current_position(self, positions_pct_by_id: Mapping[str, int]) -> int | None:
         """Group position to report for the given shade positions."""
         shades = self._shades_for(positions_pct_by_id.keys())
         if not shades:
@@ -235,10 +231,10 @@ class AlignmentGroup:
         height = self.common_hemline_height(positions_pct_by_id)
         if height is None:
             height = sum(
-                shade.hemline_height(positions_pct_by_id[shade.entity_id])
+                shade.height_for_position(positions_pct_by_id[shade.entity_id])
                 for shade in shades
             ) / len(shades)
-        return self.position_pct_for(height)
+        return round(self.position_for_height(height))
 
     def plan(
         self,
@@ -252,14 +248,14 @@ class AlignmentGroup:
         `moving_entity_ids` are shades that may still be heading somewhere
         else; any already at their new target get a trip that holds them there.
         """
-        target_height = self.hemline_height_for(target_pct)
+        target_height = self.height_for_position(target_pct)
         trips: list[Trip] = []
         holds: list[Trip] = []
         for shade in self._shades_for(positions_pct_by_id.keys()):
             trip = Trip(
                 shade,
                 positions_pct_by_id[shade.entity_id],
-                shade.position_pct_for(target_height),
+                round(shade.position_for_height(target_height)),
             )
             if trip.from_pct != trip.target_pct:
                 trips.append(trip)
@@ -309,7 +305,7 @@ class AlignmentGroup:
             return "some shade positions are unknown"
         endpoint_pct = 100 if direction is Direction.OPENING else 0
         heights = [
-            shade.hemline_height(positions_pct_by_id[shade.entity_id])
+            shade.height_for_position(positions_pct_by_id[shade.entity_id])
             for shade in self.shades
             if positions_pct_by_id[shade.entity_id] != endpoint_pct
         ]
@@ -347,7 +343,7 @@ def _staggered(trips: list[Trip]) -> list[Trip]:
             # How long the leader takes to move from where it starts to the
             # follower's hemline: positions change at a constant rate.
             delay_s=abs(
-                leader.shade.exact_position_pct_for(trip.from_height) - leader.from_pct
+                leader.shade.position_for_height(trip.from_height) - leader.from_pct
             )
             / 100
             * leader.shade.travel_time_s,
