@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
@@ -46,7 +46,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
-from .alignment import AlignmentGroup, Direction, HemlineCurve, Plan, Shade, Trip
+from .alignment import AlignmentGroup, Direction, Plan, Shade, Trip, shared_roll_curve
 from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
@@ -111,25 +111,26 @@ async def async_setup_entry(
     """Set up the aligned cover group entity."""
     options = entry.options
     configs = options[CONF_COVERS]
-    group_curve = HemlineCurve.straight(
-        min(shade[CONF_CLOSED_HEIGHT] for shade in configs),
-        max(shade[CONF_OPEN_HEIGHT] for shade in configs),
+    # Shades' rolls match at every hemline height, so they share one curve:
+    # the tallest shade's, extended over the whole group (the setup flow checks
+    # it can be).
+    group_curve = shared_roll_curve(
+        ((shade[CONF_CLOSED_HEIGHT], shade[CONF_OPEN_HEIGHT]) for shade in configs),
+        options.get(CONF_HALFWAY_HEIGHT),
     )
-    if (halfway_height := options.get(CONF_HALFWAY_HEIGHT)) is not None:
-        # All shades share one roll, so the tallest shade spans the whole group
-        # and its curve is the group's (the setup flow checks this).
-        group_curve = replace(group_curve, halfway_height=halfway_height)
 
     def window_pct(shade: dict[str, Any]) -> float:
         """How much of the group's range this shade covers, in group percent."""
-        return group_curve.position_at(shade[CONF_OPEN_HEIGHT]) - (
-            group_curve.position_at(shade[CONF_CLOSED_HEIGHT])
+        return group_curve.position_pct_at(shade[CONF_OPEN_HEIGHT]) - (
+            group_curve.position_pct_at(shade[CONF_CLOSED_HEIGHT])
         )
 
-    # Positions change at a steady rate; the tallest shade's travel time sets it.
-    pct_per_s = (
-        max(window_pct(shade) for shade in configs) / options[CONF_TRAVEL_TIME_S]
+    # Positions change at a steady rate, set by the travel time measured on the
+    # tallest shade (the longest height range, as the setup flow asks).
+    tallest = max(
+        configs, key=lambda shade: shade[CONF_OPEN_HEIGHT] - shade[CONF_CLOSED_HEIGHT]
     )
+    pct_per_s = window_pct(tallest) / options[CONF_TRAVEL_TIME_S]
     group = AlignmentGroup(
         (
             Shade(
@@ -137,7 +138,7 @@ async def async_setup_entry(
                 closed_height=shade[CONF_CLOSED_HEIGHT],
                 open_height=shade[CONF_OPEN_HEIGHT],
                 travel_time_s=window_pct(shade) / pct_per_s,
-                halfway_height=group_curve.between(
+                halfway_height=group_curve.rescaled_to(
                     shade[CONF_CLOSED_HEIGHT], shade[CONF_OPEN_HEIGHT]
                 ).halfway_height,
             )
@@ -302,8 +303,8 @@ class AlignedCoverGroup(CoverEntity):
                     "halfway_height": shade.curve.halfway_height,
                     "travel_time_s": shade.travel_time_s,
                     "group_window_pct": [
-                        self._group.curve.position_at(shade.closed_height),
-                        self._group.curve.position_at(shade.open_height),
+                        self._group.curve.position_pct_at(shade.closed_height),
+                        self._group.curve.position_pct_at(shade.open_height),
                     ],
                     "reported_position_pct": (
                         position_pct := self._positions_pct_by_id.get(shade.entity_id)

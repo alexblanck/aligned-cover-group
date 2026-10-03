@@ -39,7 +39,7 @@
       },
       "travel": {
         "title": "Travel time",
-        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.\n\nRoller shades also don't move evenly: the roll is fattest when open, so the hemline drops faster near the top. If your shades' hemlines don't line up partway, set {name} to 50% on its own and enter its hemline height. This assumes every shade in the group uses the same fabric and tube.",
+        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.\n\nRoller shades also don't move evenly: the roll is fattest when open, so the hemline drops faster near the top. If your shades' hemlines don't line up partway, set {name} to 50% on its own and enter its hemline height. This assumes the shades' rolls match: same fabric and tube, with the same amount of fabric wound on whenever their hemlines are level.",
         "data": {
           "travel_time_s": "Full travel time",
           "halfway_height": "Hemline height at 50% (optional)"
@@ -58,7 +58,7 @@
       "pico_duplicate": "Choose a different button for each Pico role.",
       "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height.",
       "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights.",
-      "halfway_needs_shared_roll": "The 50% height assumes every shade is the same roller, so the tallest shade must have both the lowest closed height and the highest open height. Leave it empty for shades that don't share a top."
+      "halfway_cant_reach": "With this 50% height, the shades' shared curve flattens out before reaching every shade's range, as if the roll ran out of fabric. Check the measurements, or leave the 50% height empty."
     }
   },
   "options": {
@@ -99,7 +99,7 @@
       },
       "travel": {
         "title": "Travel time",
-        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.\n\nRoller shades also don't move evenly: the roll is fattest when open, so the hemline drops faster near the top. If your shades' hemlines don't line up partway, set {name} to 50% on its own and enter its hemline height. This assumes every shade in the group uses the same fabric and tube.",
+        "description": "How long does {name}, the tallest shade, take to go from fully closed to fully open? All shades in the group are assumed to move at the same speed.\n\nRoller shades also don't move evenly: the roll is fattest when open, so the hemline drops faster near the top. If your shades' hemlines don't line up partway, set {name} to 50% on its own and enter its hemline height. This assumes the shades' rolls match: same fabric and tube, with the same amount of fabric wound on whenever their hemlines are level.",
         "data": {
           "travel_time_s": "Full travel time",
           "halfway_height": "Hemline height at 50% (optional)"
@@ -118,7 +118,7 @@
       "pico_duplicate": "Choose a different button for each Pico role.",
       "ranges_do_not_overlap": "This shade's open-to-closed range doesn't overlap the other shades'. Every shade's range must share some height.",
       "halfway_out_of_range": "That's outside the heights a roller shade can have at 50%; check the measurement and the open and closed heights.",
-      "halfway_needs_shared_roll": "The 50% height assumes every shade is the same roller, so the tallest shade must have both the lowest closed height and the highest open height. Leave it empty for shades that don't share a top."
+      "halfway_cant_reach": "With this 50% height, the shades' shared curve flattens out before reaching every shade's range, as if the roll ran out of fabric. Check the measurements, or leave the 50% height empty."
     }
   }
 }

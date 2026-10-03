@@ -67,7 +67,10 @@ class ShadeSpec:
 
     Its position counts motor turns. With `roll_curvature`, it's a roller whose
     roll shrinks as it unwinds, so each turn lowers the hemline a little less
-    than the one before.
+    than the one before. Turns are counted from the hemline height where the
+    roll would be fully wound, `roll_top_height` (by default its open height),
+    in units of fabric length at that point; shades sharing a `roll_top_height`
+    and curvature have matching rolls at every hemline height.
     """
 
     name: str
@@ -76,17 +79,28 @@ class ShadeSpec:
     travel_time_s: float
     position_pct: float = 0
     roll_curvature: float = 0.0
+    roll_top_height: float | None = None
+
+    def _turns_down_to(self, height: float) -> float:
+        top = self.open_height if self.roll_top_height is None else self.roll_top_height
+        drop = top - height
+        c = self.roll_curvature
+        return drop if c == 0 else (1 - (1 - 4 * c * drop) ** 0.5) / (2 * c)
 
     @property
     def full_turns(self) -> float:
-        """Turns from open to closed, in fabric length at the top of the roll."""
-        span = self.open_height - self.closed_height
-        c = self.roll_curvature
-        return span if c == 0 else (1 - (1 - 4 * c * span) ** 0.5) / (2 * c)
+        """Turns from open to closed."""
+        return self._turns_down_to(self.closed_height) - self._turns_down_to(
+            self.open_height
+        )
 
     def hemline_at(self, position_pct: float) -> float:
-        turns = (1 - position_pct / 100) * self.full_turns
-        return self.open_height - (turns - self.roll_curvature * turns * turns)
+        top = self.open_height if self.roll_top_height is None else self.roll_top_height
+        turns = (
+            self._turns_down_to(self.open_height)
+            + (1 - position_pct / 100) * self.full_turns
+        )
+        return top - (turns - self.roll_curvature * turns * turns)
 
     @classmethod
     def from_config(

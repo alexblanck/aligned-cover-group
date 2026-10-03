@@ -7,13 +7,36 @@ window shades of different sizes into a single `cover` entity whose bottom edges
 ## Goals
 
 1. **Alignment** — shades of different heights/positions present an even
-   hemline. The group's position is a hemline height, not a shared percentage.
+   hemline. The group's position stands for a shared hemline height, not a
+   percentage passed to every shade.
 2. **Synchronized motion** — when a Lutron Pico is paired (on the Caseta bridge)
    to exactly the shades in the group, the group uses Pico button presses so
    every shade starts/stops at the same instant.
 
 Pico support is optional; without one the group still aligns shades using
 per-shade commands.
+
+Some shade systems do this natively: Lutron's [Intelligent Hembar
+Alignment](https://www.lutron.com/us/en/window-treatments/shades/roller-shades)
+(IHA, on lines such as Sivoia QS and Palladiom) monitors shade speed hundreds of
+times per second to keep grouped shades within 1/8 in (3 mm), in motion or
+stopped, even when windows are different sizes. This integration is a
+workaround for shades without it, such as Lutron Serena.
+
+## Target hardware and assumptions
+
+Built and tested with Lutron Serena roller shades on a Caseta bridge. The
+design relies on:
+
+- **Positions count motor rotation at a steady speed** (most motorized roller
+  shades): 50% is half the run time from fully open, not necessarily half the
+  height. See "Hemline curves".
+- **Shades report their destination immediately** when commanded, and their
+  real position only when stopped; never opening/closing. See "Motion".
+- **For the roller-curve correction, matched rolls:** at any given hemline
+  height, every shade has the same amount of fabric on the same kind of roll.
+- **All shades move at the same speed** (same motor and roll), for staying
+  level while moving.
 
 ## Configuration (UI only)
 
@@ -77,17 +100,25 @@ set. Valid halfway heights are above a quarter of the way up and at most the
 midpoint (a roll can't get fatter as it unwinds, and below a quarter the curve
 would turn back on itself).
 
-**Shared roll (the only case configurable today).** Every shade in a group is
-assumed to be the same roller (same fabric and tube, fully rolled when open),
-differing only in its limits. Then:
+**Matched rolls (the only case configurable today).** Every shade's roll is
+assumed to match the others' at any given hemline height: same fabric and tube,
+and the same amount of fabric wound on whenever the hemlines are level. Then
+every shade follows one height curve, differing only in which part it covers.
 
-- The tallest shade spans the whole group (the setup flow checks this when a
-  50% height is given), and its curve is the group's curve.
-- Every other shade covers part of that curve: from the group position where it
-  reaches fully closed to the one where it reaches fully open (its *window*).
-  Its own curve is that part of the group curve, rescaled to its 0-100%
-  (`HemlineCurve.between`).
-- Its travel time is its window's share of the tallest shade's travel time.
+- The tallest shade (longest height range) is measured at 50%. Its curve,
+  extended over the whole group (lowest closed to highest open), is the
+  group's curve (`shared_roll_curve`). Extending is the matched-roll
+  assumption applied beyond the measured range; if the curve would flatten out
+  before reaching a shade (as if the roll ran out of fabric), the setup flow
+  rejects the measurement.
+- Each shade covers the part of that curve between its own heights: from the
+  group position where it reaches fully closed to the one where it reaches
+  fully open (its *window*). Its own curve is that part, rescaled to its
+  0-100% (`HemlineCurve.rescaled_to`).
+- Its travel time is its window's size relative to the tallest shade's window,
+  times the tallest shade's measured travel time. (With a curve, the shade with
+  the widest window isn't necessarily the tallest: near the top the hemline
+  moves faster, so the same height takes up fewer positions.)
 - Aligned shades keep pace while moving: both have the same remaining roll at
   the same height.
 

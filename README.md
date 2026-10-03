@@ -7,6 +7,29 @@ sizes into one cover whose bottom edges (hemlines) stay level — at rest and
 while moving. Optionally drives a Lutron Caseta Pico so every shade starts and
 stops at exactly the same moment.
 
+Some higher-end shades do this themselves: Lutron's [Intelligent Hembar
+Alignment](https://www.lutron.com/us/en/window-treatments/shades/roller-shades)
+(on lines such as Sivoia QS and Palladiom) monitors motor speed to keep grouped
+shades within 1/8 in (3 mm) of each other, moving or stopped, even across
+different window sizes. This integration is a workaround that brings simpler
+shades, such as Lutron Serena, closer to that behavior.
+
+## Supported shades
+
+Built and tested with **Lutron Serena roller shades** on a **Caseta** bridge,
+and it relies on how those behave:
+
+- A shade's position counts motor rotation, and the motor turns at a steady
+  speed, so 50% is half the run time from fully open (not necessarily half the
+  height). This is true of most motorized roller shades.
+- Shades report their destination as soon as they're commanded, not their
+  position while moving, so the integration times moves itself.
+- For the optional roller-curve correction, the shades' rolls match: same
+  fabric and tube, and the same amount of fabric wound on whenever their
+  hemlines are level. Shades can still differ in where they start and stop.
+
+Other shades that work the same way should work too, but haven't been tested.
+
 ## How it works
 
 - You tell it each shade's hemline height when fully closed and fully open,
@@ -18,11 +41,12 @@ stops at exactly the same moment.
 - Roller shades don't move evenly: the roll is fattest when open, so the
   hemline drops faster near the top, and shades of different lengths drift out
   of line partway even when level at the ends. If that happens, enter the
-  tallest shade's hemline height at 50% during setup. This assumes every shade
-  in the group is the same kind of roller (same fabric and tube, fully rolled
-  up when open), differing only in where its bottom limit is set.
-- The group's 0–100% position is a shared hemline height. Each shade is sent
-  to whatever position puts its hemline there (clamped to its own range).
+  tallest shade's hemline height at 50% during setup. This assumes the shades'
+  rolls match (see Supported shades).
+- The group's 0–100% position stands for a shared hemline height (with the
+  roller-curve correction, it matches the tallest shade's own position). Each
+  shade is sent to whatever position puts its hemline there (clamped to its
+  own range).
 - When shades start from different heights, the lowest (or highest) one starts
   first and the others join as its hemline reaches theirs.
 - With a Pico configured, moves that start from a level hemline begin with a

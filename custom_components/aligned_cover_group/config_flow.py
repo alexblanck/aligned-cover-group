@@ -25,7 +25,7 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
-from .alignment import halfway_height_range
+from .alignment import halfway_height_range, shared_roll_curve
 from .const import (
     CONF_CLOSED_HEIGHT,
     CONF_COVERS,
@@ -194,8 +194,8 @@ class _ShadeSteps(ConfigEntryBaseFlow):
                 pass
             elif not low < halfway_height <= high:
                 errors["base"] = "halfway_out_of_range"
-            elif not self._tallest_spans_group(tallest):
-                errors["base"] = "halfway_needs_shared_roll"
+            elif not self._shared_curve_fits(halfway_height):
+                errors["base"] = "halfway_cant_reach"
             if not errors:
                 return self._async_finish(
                     {**self._group, CONF_COVERS: self._shades, **user_input}
@@ -214,14 +214,19 @@ class _ShadeSteps(ConfigEntryBaseFlow):
             },
         )
 
-    def _tallest_spans_group(self, tallest: dict[str, Any]) -> bool:
-        """Whether the tallest shade goes lowest and highest, as one roll would."""
-        lowest = min(shade[CONF_CLOSED_HEIGHT] for shade in self._shades)
-        highest = max(shade[CONF_OPEN_HEIGHT] for shade in self._shades)
-        return bool(
-            tallest[CONF_CLOSED_HEIGHT] == lowest
-            and tallest[CONF_OPEN_HEIGHT] == highest
-        )
+    def _shared_curve_fits(self, halfway_height: float) -> bool:
+        """Whether the tallest shade's curve extends over every shade."""
+        try:
+            shared_roll_curve(
+                (
+                    (shade[CONF_CLOSED_HEIGHT], shade[CONF_OPEN_HEIGHT])
+                    for shade in self._shades
+                ),
+                halfway_height,
+            )
+        except ValueError:
+            return False
+        return True
 
     def _friendly_name(self, entity_id: str) -> str:
         state = self.hass.states.get(entity_id)

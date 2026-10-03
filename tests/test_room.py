@@ -633,3 +633,54 @@ async def test_identical_rollers_follow_the_group_position(
 
     assert room.positions_pct_by_id() == {"cover.a": target_pct, "cover.b": target_pct}
     assert room.group.attributes["current_position"] == target_pct
+
+
+def matched_rolls(position_pct: float) -> list[ShadeSpec]:
+    """Three shades whose rolls match at every hemline height.
+
+    "high" has the longest range, so it's the one measured; "tall" reaches
+    below it and "low" further still, so the curve must be extended. "tall"
+    covers more of the group's positions than "high" (it's lower on the roll,
+    where the hemline moves slower), so the travel time must be tied to the
+    measured shade rather than the widest window.
+    """
+    # A stronger curve than the living room's, so extension errors show.
+    curvature = 0.0025
+    specs = [
+        ShadeSpec("tall", 30, 100, 30, position_pct, curvature, 100),
+        ShadeSpec("high", 50, 125, 0, position_pct, curvature, 100),
+        ShadeSpec("low", 12, 60, 0, position_pct, curvature, 100),
+    ]
+    for spec in specs[1:]:
+        spec.travel_time_s = 30 * spec.full_turns / specs[0].full_turns
+    return specs
+
+
+@pytest.mark.parametrize("target_pct", [25, 50, 75])
+async def test_matched_rolls_beyond_the_tallest_level_at_rest(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, target_pct: int
+) -> None:
+    room = await build_room(hass, freezer, matched_rolls(100), pico=False)
+
+    await room.command("set_cover_position", position=target_pct)
+    await room.run_until_still()
+
+    final = {eid: shade.position_pct for eid, shade in room.shades.items()}
+    assert room.misalignment(final) <= HEIGHT_TOLERANCE
+    assert room.group.attributes["aligned"] is True
+
+
+async def test_matched_rolls_beyond_the_tallest_stay_level_while_moving(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    room = await build_room(hass, freezer, matched_rolls(0), pico=False)
+
+    await room.command("open_cover")
+    await room.run_until_still()
+    await room.command("set_cover_position", position=40)
+    await room.run_until_still()
+    await room.command("close_cover")
+    await room.run_until_still()
+
+    assert set(room.positions_pct_by_id().values()) == {0}
+    assert room.worst_misalignment() <= HEIGHT_TOLERANCE

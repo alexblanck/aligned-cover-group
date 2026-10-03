@@ -148,25 +148,38 @@ async def test_halfway_height_must_fit_a_roller(hass: HomeAssistant) -> None:
     assert result["options"]["halfway_height"] == 44
 
 
-async def test_halfway_height_needs_the_tallest_shade_to_span_the_group(
+async def configure_shades(
+    hass: HomeAssistant, heights: list[tuple[float, float]]
+) -> dict[str, Any]:
+    """Set up two shades with these (closed, open) heights; returns the travel step."""
+    result = await submit_group(hass, await start_flow(hass))
+    for closed, opened in heights:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"closed_height": closed, "open_height": opened}
+        )
+    assert result["step_id"] == "travel"
+    return result
+
+
+async def test_halfway_height_extends_to_shades_above_the_tallest(
     hass: HomeAssistant,
 ) -> None:
-    flow = await start_flow(hass)
-    result = await submit_group(hass, flow)
-    # The taller shade (20 to 80) doesn't reach the other's top (90).
-    for heights in (
-        {"closed_height": 50, "open_height": 90},
-        {"closed_height": 20, "open_height": 80},
-    ):
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], heights
-        )
+    # The taller shade (20 to 80) doesn't reach the other's top (90); its
+    # curve is extended up to it.
+    result = await configure_shades(hass, [(50, 90), (20, 80)])
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"travel_time_s": 30, "halfway_height": 48}
     )
-    assert result["errors"] == {"base": "halfway_needs_shared_roll"}
-
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"travel_time_s": 30}
-    )
     assert result["type"] == "create_entry"
+
+
+async def test_halfway_height_whose_curve_cannot_reach_every_shade(
+    hass: HomeAssistant,
+) -> None:
+    # A strong curve on the taller shade (40 to 100) flattens out at 37.5,
+    # as if the roll ran out of fabric, short of the other shade's 30.
+    result = await configure_shades(hass, [(40, 100), (30, 70)])
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"travel_time_s": 30, "halfway_height": 60}
+    )
+    assert result["errors"] == {"base": "halfway_cant_reach"}

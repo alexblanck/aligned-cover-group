@@ -2,10 +2,15 @@
 
 Pure math with no Home Assistant imports so it can be unit tested directly.
 
-Naming: `*_pct` values are positions in whole percents following Home
-Assistant's convention (0 fully closed, 100 fully open). `*_height` values are
-hemline heights: the height of a shade's bottom edge, in whatever unit the user
-configured (e.g. inches from the floor).
+Naming:
+
+- `*_pct` values are positions in percent, following Home Assistant's
+  convention (0 fully closed, 100 fully open). Positions shades report or are
+  sent are whole numbers (`int`); positions worked out along a curve are
+  fractional (`float`) and only rounded when a shade is commanded.
+- `*_height` values are hemline heights: the height of a shade's bottom edge,
+  in whatever unit the user measured in.
+- `*_s` values are seconds.
 """
 
 from __future__ import annotations
@@ -20,6 +25,10 @@ from enum import StrEnum
 # shade up to 0.5% of its span off, so this leaves headroom while staying small.
 ALIGN_TOLERANCE_FRACTION = 0.01
 
+# Slack, as a fraction of a curve's range, when checking its halfway height:
+# slices of a straight curve compute their midpoint with floating-point error.
+HALFWAY_TOLERANCE_FRACTION = 1e-9
+
 
 class Direction(StrEnum):
     """Direction of travel."""
@@ -33,8 +42,11 @@ def halfway_height_range(
 ) -> tuple[float, float]:
     """Halfway heights (exclusive low, inclusive high) a roller can have.
 
-    The highest is the straight-line midpoint; at a quarter of the way up or
-    below, the curve would turn back on itself.
+    Outside this range, the curve through the three heights would describe a
+    shade that can't exist, so the measurement must be wrong. Above the
+    midpoint, the hemline would speed up as it lowered, as if the roll got
+    fatter while unwinding. At or below a quarter of the way up, the hemline
+    would slow to a stop, or even reverse, just before reaching closed.
     """
     span = open_height - closed_height
     return closed_height + span / 4, closed_height + span / 2
@@ -42,19 +54,39 @@ def halfway_height_range(
 
 @dataclass(frozen=True)
 class HemlineCurve:
-    """Hemline height across a 0-100% range of positions.
+    """How a single shade's hemline height follows its position (0-100%).
 
-    Positions count motor rotation, which for a roller isn't proportional to
-    height: the roll is fattest when open, so the hemline moves faster near the
-    top. A roll that shrinks steadily as it unwinds makes height a quadratic in
-    position, so the curve is the quadratic through three points: closed (0%),
-    halfway (50%) and open (100%). With the halfway height at the midpoint it's
-    a straight line.
+    The group's position uses one too, as if the group were a single shade
+    covering every shade's range.
+
+    Positions count motor rotation, as on most motorized roller shades,
+    including the Lutron Serena shades this was built and tested with. Their
+    motors turn at a steady speed, so a position is also a share of the run
+    time. Rotation isn't proportional to height, though: the roll is fattest
+    when open, so the hemline moves faster near the top. A roll that shrinks
+    steadily as it unwinds makes height a quadratic in position, so the curve
+    is the quadratic through three points: closed (0%), halfway (50%) and open
+    (100%). With the halfway height at the midpoint it's a straight line.
     """
 
     closed_height: float
     open_height: float
     halfway_height: float
+
+    def __post_init__(self) -> None:
+        """Reject curves no shade could follow (see `halfway_height_range`)."""
+        if not self.open_height > self.closed_height:
+            raise ValueError(
+                f"Open height {self.open_height} must be above "
+                f"closed height {self.closed_height}"
+            )
+        low, high = halfway_height_range(self.closed_height, self.open_height)
+        slack = self._span * HALFWAY_TOLERANCE_FRACTION
+        if not low < self.halfway_height <= high + slack:
+            raise ValueError(
+                f"Halfway height {self.halfway_height} must be above {low} "
+                f"and at most {high}"
+            )
 
     @classmethod
     def straight(cls, closed_height: float, open_height: float) -> HemlineCurve:
@@ -62,29 +94,51 @@ class HemlineCurve:
         return cls(closed_height, open_height, (closed_height + open_height) / 2)
 
     def height_at(self, position_pct: float) -> float:
-        """Hemline height at a position."""
+        """Hemline height at a position, clamped to 0-100%."""
+        return self._height_extended(min(max(position_pct, 0.0), 100.0))
+
+    def position_pct_at(self, hemline_height: float) -> float:
+        """Unrounded position in percent for a height, clamped to the curve's range."""
+        clamped = min(max(hemline_height, self.closed_height), self.open_height)
+        return self._position_pct_extended(clamped)
+
+    def rescaled_to(self, closed_height: float, open_height: float) -> HemlineCurve:
+        """The same curve, with 0-100% running from `closed_height` to `open_height`.
+
+        For shades whose rolls match at every hemline height: a shade with a
+        raised bottom limit or a lower top follows part of this curve, and one
+        reaching higher or lower follows it extended beyond its range. Raises
+        ValueError if the extended curve can't get there (it would flatten out,
+        as if the roll ran out of fabric).
+        """
+        middle = (
+            self._position_pct_extended(closed_height)
+            + self._position_pct_extended(open_height)
+        ) / 2
+        return HemlineCurve(closed_height, open_height, self._height_extended(middle))
+
+    def _height_extended(self, position_pct: float) -> float:
+        """Height at a position, extending the curve beyond 0-100%."""
         fraction = position_pct / 100
         rise, bend = self._shape()
         return self.closed_height + self._span * (rise * fraction + bend * fraction**2)
 
-    def position_at(self, hemline_height: float) -> float:
-        """Exact (unrounded) position for a height, clamped to the curve's range."""
-        clamped = min(max(hemline_height, self.closed_height), self.open_height)
-        fraction_up = (clamped - self.closed_height) / self._span
+    def _position_pct_extended(self, hemline_height: float) -> float:
+        """Position in percent for a height, extending the curve beyond its range."""
+        fraction_up = (hemline_height - self.closed_height) / self._span
         rise, bend = self._shape()
-        # Solves rise * x + bend * x**2 = fraction_up for x in 0..1, written to
-        # stay accurate when bend is near zero (an almost straight line).
-        discriminant = max(0.0, rise**2 + 4 * bend * fraction_up)
-        return 100 * 2 * fraction_up / (rise + math.sqrt(discriminant))
-
-    def between(self, closed_height: float, open_height: float) -> HemlineCurve:
-        """The part of this curve between two heights, as its own 0-100%.
-
-        A shade on the same roll that only covers part of this range (a raised
-        bottom limit, or a lower top) follows this part of the curve.
-        """
-        middle = (self.position_at(closed_height) + self.position_at(open_height)) / 2
-        return HemlineCurve(closed_height, open_height, self.height_at(middle))
+        # Solves rise * x + bend * x**2 = fraction_up for x, on the rising side
+        # of the curve. With d = rise**2 + 4 * bend * fraction_up, the usual
+        # quadratic formula is
+        #     x = (-rise + sqrt(d)) / (2 * bend)
+        # which divides by bend, zero for a straight line. Multiplying top and
+        # bottom by (rise + sqrt(d)) gives this equivalent form, which doesn't,
+        # and becomes fraction_up / rise when bend is zero.
+        discriminant = rise**2 + 4 * bend * fraction_up
+        denominator = rise + math.sqrt(max(discriminant, 0.0))
+        if discriminant < 0 or denominator <= 0:
+            raise ValueError(f"The curve never reaches {hemline_height}")
+        return 100 * 2 * fraction_up / denominator
 
     @property
     def _span(self) -> float:
@@ -94,6 +148,25 @@ class HemlineCurve:
         """Coefficients of height = closed + span * (rise * x + bend * x**2)."""
         halfway_fraction = (self.halfway_height - self.closed_height) / self._span
         return 4 * halfway_fraction - 1, 2 - 4 * halfway_fraction
+
+
+def shared_roll_curve(
+    ranges: Iterable[tuple[float, float]], halfway_height: float | None
+) -> HemlineCurve:
+    """The group's curve for shades whose rolls match at every hemline height.
+
+    `ranges` are the shades' (closed, open) heights, and `halfway_height` is
+    the tallest one's hemline at 50% (without it, height is proportional to
+    position). The tallest shade's curve is extended to cover every shade.
+    Raises ValueError if it can't be.
+    """
+    ranges = list(ranges)
+    lowest = min(closed for closed, _ in ranges)
+    highest = max(opened for _, opened in ranges)
+    if halfway_height is None:
+        return HemlineCurve.straight(lowest, highest)
+    closed, opened = max(ranges, key=lambda heights: heights[1] - heights[0])
+    return HemlineCurve(closed, opened, halfway_height).rescaled_to(lowest, highest)
 
 
 @dataclass(frozen=True)
@@ -126,13 +199,13 @@ class Shade:
         """The closest hemline height this shade can reach."""
         return min(max(hemline_height, self.closed_height), self.open_height)
 
-    def exact_position_for(self, hemline_height: float) -> float:
-        """Unrounded shade position that puts the hemline at `hemline_height`."""
-        return self.curve.position_at(hemline_height)
+    def exact_position_pct_for(self, hemline_height: float) -> float:
+        """Unrounded position in percent that puts the hemline at `hemline_height`."""
+        return self.curve.position_pct_at(hemline_height)
 
     def position_pct_for(self, hemline_height: float) -> int:
         """Shade position that puts the hemline closest to `hemline_height`."""
-        return round(self.exact_position_for(hemline_height))
+        return round(self.exact_position_pct_for(hemline_height))
 
 
 @dataclass(frozen=True)
@@ -221,7 +294,7 @@ class AlignmentGroup:
 
     def position_pct_for(self, hemline_height: float) -> int:
         """Group position for a hemline height."""
-        return round(self.curve.position_at(hemline_height))
+        return round(self.curve.position_pct_at(hemline_height))
 
     def common_hemline_height(
         self, positions_pct_by_id: Mapping[str, int]
@@ -378,7 +451,7 @@ def _staggered(trips: list[Trip]) -> list[Trip]:
             # How long the leader takes to move from where it starts to the
             # follower's hemline: positions change at a constant rate.
             delay_s=abs(
-                leader.shade.exact_position_for(trip.from_height) - leader.from_pct
+                leader.shade.exact_position_pct_for(trip.from_height) - leader.from_pct
             )
             / 100
             * leader.shade.travel_time_s,

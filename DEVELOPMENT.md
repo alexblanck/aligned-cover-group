@@ -91,9 +91,11 @@ helpers), which would hide timing bugs.
 
 - Keep `alignment.py` free of Home Assistant imports; the entity in `cover.py`
   turns its plans into service calls.
-- `*_pct` names hold positions in whole percents (0 closed, 100 open, `int`
-  like Home Assistant's `current_position`). `*_height` names hold hemline
-  heights in the user's unit.
+- `*_pct` names hold positions in percent (0 closed, 100 open): whole numbers
+  (`int`, like Home Assistant's `current_position`) where shades report or are
+  sent them, fractional (`float`) where worked out along a curve, rounded only
+  when commanding a shade. `*_height` names hold hemline heights in the user's
+  unit; `*_s` names hold seconds.
 - Home Assistant's `async_` prefix means a coroutine or a `@callback`
   function, never a plain undecorated function.
 - Debug logs should name the group (`self.entity_id`) so multiple groups can be
