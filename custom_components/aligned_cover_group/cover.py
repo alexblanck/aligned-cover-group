@@ -43,7 +43,6 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_state_change_event,
-    async_track_time_interval,
 )
 from homeassistant.util import dt as dt_util
 
@@ -70,9 +69,6 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 ATTR_HEMLINE_HEIGHTS = "hemline_heights"
-
-# How often the group's estimated position is refreshed while a plan runs.
-REFRESH_INTERVAL = timedelta(seconds=1)
 
 
 @dataclass(frozen=True)
@@ -252,14 +248,14 @@ class AlignedCoverGroup(CoverEntity):
     @property
     def current_cover_position(self) -> int | None:
         """Group position derived from the shades' hemlines."""
-        return self._group.current_position(self._positions_now())
+        return self._group.current_position(self._displayed_positions())
 
     @property
     def is_closed(self) -> bool | None:
         """Closed when every shade with a known position is closed."""
         if not self._positions_pct_by_id:
             return None
-        return all(pct <= 0 for pct in self._positions_now().values())
+        return all(pct <= 0 for pct in self._displayed_positions().values())
 
     @property
     def is_opening(self) -> bool:
@@ -275,7 +271,6 @@ class AlignedCoverGroup(CoverEntity):
     def diagnostics(self) -> dict[str, Any]:
         """Settings as the group uses them, the shades' state, and any move."""
         now = dt_util.utcnow()
-        positions_pct_by_id = self._positions_now()
         return {
             "entity_id": self.entity_id,
             "state": self.state,
@@ -297,11 +292,8 @@ class AlignedCoverGroup(CoverEntity):
                         shade.view.closed_pct,
                         shade.view.open_pct,
                     ],
-                    "reported_position_pct": self._positions_pct_by_id.get(
-                        shade.entity_id
-                    ),
-                    "position_pct": (
-                        position_pct := positions_pct_by_id.get(shade.entity_id)
+                    "reported_position_pct": (
+                        position_pct := self._positions_pct_by_id.get(shade.entity_id)
                     ),
                     "hemline_height": (
                         None
@@ -335,7 +327,7 @@ class AlignedCoverGroup(CoverEntity):
         from setting `self.group`, which makes HA send service calls straight
         to the members, bypassing alignment and the Pico.
         """
-        positions_pct_by_id = self._positions_now()
+        positions_pct_by_id = self._displayed_positions()
         return {
             ATTR_ENTITY_ID: self._entity_ids,
             "aligned": (
@@ -387,7 +379,7 @@ class AlignedCoverGroup(CoverEntity):
 
     async def _async_set_group_position(self, target_pct: int) -> None:
         """Plan the moves to `target_pct` and run the plan."""
-        positions_pct_by_id = self._positions_now()
+        positions_pct_by_id = self._planning_positions()
         positions_source = "estimated" if self._moving else "reported"
         moving_entity_ids = set(self._running_moves) if self._moving else set()
         if missing := [e for e in self._entity_ids if e not in positions_pct_by_id]:
@@ -427,7 +419,27 @@ class AlignedCoverGroup(CoverEntity):
             self.async_write_ha_state()  # a previous plan may have just been abandoned
 
     @callback
-    def _positions_now(self) -> dict[str, int]:
+    def _displayed_positions(self) -> dict[str, int]:
+        """Shade positions the group's state is reported from.
+
+        While a plan runs, each moving shade's target, so the group reports
+        where it's heading, like Caseta shades themselves (they report their
+        destination as soon as they're commanded). Reporting progress instead
+        would make dashboard sliders, which always show the reported position,
+        jump back from where they were dropped. Otherwise, what the shades
+        reported.
+        """
+        return {
+            entity_id: (
+                self._running_moves[entity_id].move.target_pct
+                if entity_id in self._running_moves
+                else position_pct
+            )
+            for entity_id, position_pct in self._positions_pct_by_id.items()
+        }
+
+    @callback
+    def _planning_positions(self) -> dict[str, int]:
         """Where the shades are now, as far as the group can tell.
 
         Caseta shades report their destination as soon as they're commanded,
@@ -484,11 +496,6 @@ class AlignedCoverGroup(CoverEntity):
         self._timers.append(
             async_call_later(self.hass, plan.duration_s(), self._async_plan_done)
         )
-        self._timers.append(
-            async_track_time_interval(
-                self.hass, self._async_refresh_estimate, REFRESH_INTERVAL
-            )
-        )
         self.async_write_ha_state()
 
         generation = self._generation
@@ -526,10 +533,6 @@ class AlignedCoverGroup(CoverEntity):
             _LOGGER.error(
                 "%s: couldn't start %s: %s", self.entity_id, move.shade.entity_id, err
             )
-
-    @callback
-    def _async_refresh_estimate(self, _now: datetime) -> None:
-        self.async_write_ha_state()
 
     @callback
     def _async_plan_done(self, _now: datetime) -> None:

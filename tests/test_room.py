@@ -107,6 +107,9 @@ async def test_stop_during_staggered_open(
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
     assert room.group.state not in ("opening", "closing")
     assert room.group.attributes["aligned"] is True
+    # The group spans the low-sill shade's range, so it matches that shade.
+    low_sill_pct = room.positions_pct_by_id()[LOW_SILL]
+    assert room.group.attributes["current_position"] == low_sill_pct
 
 
 async def test_stop_while_aligned_and_moving(
@@ -659,24 +662,48 @@ async def test_rollers_stay_level_while_moving(
     assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
-async def test_position_climbs_steadily_while_opening(
+async def test_position_reports_the_target_while_moving(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
-    # Both at 50%, so misaligned; opening starts the lower one first. Shades
-    # report their destination as soon as they're commanded, so the group
-    # must estimate where they are rather than jump to 100% when one starts.
+    # Both at 50%, so misaligned; the lower one starts first and the other
+    # joins later. Dashboard sliders show the reported position, so reporting
+    # progress (or a mix of where each shade is heading) would make a slider
+    # jump back from where it was dropped.
     room = await build_room(hass, freezer, living_room(50), pico=False)
 
-    await room.command("open_cover")
+    await room.command("set_cover_position", position=80)
     reported = []
     while room.group.state == "opening":
         reported.append(room.group.attributes["current_position"])
         await room.run(STEP_S)
 
-    assert reported == sorted(reported)
-    assert 90 < reported[-1] < 100
-    assert len(set(reported)) > 5  # refreshed as the shades move
-    assert room.group.attributes["current_position"] == 100
+    assert len(reported) > 50
+    assert set(reported) == {80}
+    assert room.group.attributes["current_position"] == 80
+
+
+@pytest.mark.parametrize("pico", [True, False], ids=["pico", "no-pico"])
+async def test_stop_mid_run_reports_where_the_shades_stopped(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, pico: bool
+) -> None:
+    room = await build_room(hass, freezer, living_room(100), pico)
+
+    await room.command("set_cover_position", position=20)
+    await room.run(8)
+    assert room.group.state == "closing"
+    assert room.group.attributes["current_position"] == 20
+    await room.command("stop_cover")
+    await room.run_until_still()
+
+    stopped = room.positions_pct_by_id()
+    assert all(30 < pct < 100 for pct in stopped.values()), stopped
+    assert room.group.state == "open"
+    # The group spans the tallest shade's range, so it matches that shade.
+    assert room.group.attributes["current_position"] == stopped["cover.left_2"]
+    assert room.group.attributes["aligned"] is True
+    for entity_id, height in room.group.attributes["hemline_heights"].items():
+        assert height == pytest.approx(room[entity_id].hemline_height, abs=0.5)
+    assert room.worst_misalignment() <= HEIGHT_TOLERANCE
 
 
 @pytest.mark.parametrize("target_pct", [25, 50, 75])

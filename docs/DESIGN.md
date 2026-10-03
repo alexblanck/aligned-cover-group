@@ -158,11 +158,18 @@ Commands are open-loop. Caseta shades report their *destination* as soon as
 they're commanded (and their real position only when stopped), never
 opening/closing, so timing comes from the shared speed. Each command makes a
 *plan*: a *move* for each shade (target and start delay), plus an optional
-Pico press. Running the plan carries out its moves. While a plan runs, the
-group uses *estimated* positions (start position, start time, speed) rather
-than the reported ones, which already show the destinations: for its own
-position and attributes (refreshed every second), and for planning a new
-command. A shade still on an earlier move that already sits at its new target
+Pico press. Running the plan carries out its moves. While a plan runs, a new
+command plans from *estimated* positions (start position, start time, speed)
+rather than the reported ones, which already show the destinations.
+
+While a plan runs, the group reports where it's heading, as Caseta shades do:
+its position and attributes come from each moving shade's target. Dashboard
+sliders always show the reported position, so reporting progress would make a
+slider jump back from where it was dropped. Once the plan ends or is stopped,
+the group reports from the shades again, which by then report where they
+really are.
+
+A shade still on an earlier move that already sits at its new target
 is sent a command to hold there, otherwise it would carry on to its old target.
 
 **Pico path** — used when a Pico is configured *and* every shade the Pico would
